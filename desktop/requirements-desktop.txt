@@ -1,0 +1,9 @@
+# 桌面版(macOS)附加依赖,在 backend/.venv 里安装:
+#   backend/.venv/bin/pip install -r desktop/requirements-desktop.txt
+# 注: pyobjc 12.0 被官方 yank(py3.9 支持声明有误),必须钉 11.1
+pyobjc-core==11.1
+pyobjc-framework-Cocoa==11.1
+pyobjc-framework-WebKit==11.1
+pyobjc-framework-Quartz==11.1
+pyobjc-framework-Security==11.1
+pywebview==6.2.1
