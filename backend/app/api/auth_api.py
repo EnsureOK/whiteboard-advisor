@@ -41,6 +41,10 @@ async def register(body: Credentials, db: OrmSession = Depends(get_db)) -> dict:
     db.add(user)
     db.commit()
     db.refresh(user)
+    # 注册赠礼:2000 积分(pack 池,不过期)
+    from app.api.billing import grant_signup_bonus
+
+    grant_signup_bonus(db, user)
     return {"token": auth_svc.create_token(user.id), "user": auth_svc.user_out(user)}
 
 

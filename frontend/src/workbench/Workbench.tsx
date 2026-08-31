@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import "./workbench.css";
-import type { ArtifactOut, Bootstrap, Client, ClientType, MessageOut, TaskOut, Todo } from "./api";
-import { api, chatStream } from "./api";
+import type { ArtifactOut, BillingStatus, Bootstrap, Client, ClientType, MessageOut, TaskOut, Todo } from "./api";
+import { api, authToken, chatStream } from "./api";
 import ClientPane from "./ClientPane";
 import ChatPane from "./ChatPane";
 import ArtifactPane from "./ArtifactPane";
 import KnowledgeView from "./KnowledgeView";
+import BillingView from "./BillingView";
 import { Icon } from "./icons";
+
+const fmtCredits = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : n.toLocaleString());
 
 const QUICK_KIND: Record<string, string> = {
   检视保单: "policy_review",
@@ -19,7 +22,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function Workbench() {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
-  const [view, setView] = useState<"home" | "kb">("home");
+  const [view, setView] = useState<"home" | "kb" | "billing">("home");
+  const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -49,7 +53,23 @@ export default function Workbench() {
         setActiveId(b.clients[0]?.id ?? null);
       })
       .catch((e) => showToast(`初始化失败: ${e.message}`));
+    // 已登录用户拉积分余额(未登录静默跳过)
+    if (authToken.get()) {
+      api.billingStatus().then(setBilling).catch(() => authToken.clear());
+    }
+    // 从 Stripe Checkout 回跳
+    const pay = new URLSearchParams(location.search).get("pay");
+    if (pay === "success") showToast("支付成功,权益到账中(异步支付以回调为准)");
+    if (pay === "cancel") showToast("已取消支付");
   }, [showToast]);
+
+  const refreshBilling = useCallback(() => {
+    if (authToken.get()) {
+      api.billingStatus().then(setBilling).catch(() => {});
+    } else {
+      setBilling(null);
+    }
+  }, []);
 
   // 切换客户 -> 加载消息与工件
   useEffect(() => {
@@ -122,6 +142,7 @@ export default function Workbench() {
       if (toolEvents.some((t) => t.name === "generate_document")) {
         await refreshArtifacts();
       }
+      refreshBilling();
     } catch (e: any) {
       showToast(`对话失败: ${e.message}`);
     } finally {
@@ -266,6 +287,17 @@ export default function Workbench() {
           {todos.length > 0 && <span className="wb-badge" />}
         </button>
         <div className="wb-rail-foot">
+          <button
+            className={"wb-rail-credits" + (view === "billing" ? " active" : "")}
+            title={billing ? `可用 ${billing.credits.totalCredits.toLocaleString()} 积分` : "登录 / 套餐与积分"}
+            onClick={() => setView("billing")}
+          >
+            {billing ? (
+              <span className="wb-mono">{fmtCredits(billing.credits.totalCredits)}</span>
+            ) : (
+              <Icon name="user" size={17} />
+            )}
+          </button>
           <span
             className={"wb-live-dot" + (boot.llm ? "" : " off")}
             title={boot.llm ? "千帆已连接" : "演示模式(未配置千帆 key)"}
@@ -273,7 +305,12 @@ export default function Workbench() {
         </div>
       </nav>
 
-      {view === "kb" ? (
+      {view === "billing" ? (
+        <BillingView
+          onToast={showToast}
+          onAuthChange={(_user, st) => setBilling(st)}
+        />
+      ) : view === "kb" ? (
         <KnowledgeView
           kbSummary={boot.kb}
           activeClientId={activeId}

@@ -163,16 +163,75 @@ export interface Bootstrap {
   embedding: boolean;
 }
 
+// ---------- 登录态(localStorage) ----------
+
+const TOKEN_KEY = "wb_token";
+
+export const authToken = {
+  get: () => localStorage.getItem(TOKEN_KEY),
+  set: (t: string) => localStorage.setItem(TOKEN_KEY, t),
+  clear: () => localStorage.removeItem(TOKEN_KEY),
+};
+
+function authHeaders(): Record<string, string> {
+  const t = authToken.get();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...init,
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(init?.headers || {}) },
   });
   if (!resp.ok) {
     const detail = await resp.json().catch(() => ({}));
     throw new Error(detail.detail || `${resp.status} ${resp.statusText}`);
   }
   return resp.json();
+}
+
+// ---------- 计费类型 ----------
+
+export interface CreditBalance {
+  planTokens: number;
+  packTokens: number;
+  planCredits: number;
+  packCredits: number;
+  totalCredits: number;
+}
+
+export interface BillingStatus {
+  plan: string;
+  planName: string;
+  features: string[];
+  active: boolean;
+  planExpiresAt: string | null;
+  credits: CreditBalance;
+  monthConsumedCredits: number;
+  hasCredits: boolean;
+}
+
+export interface PlanDef {
+  id: string;
+  name: string;
+  priceCents: number;
+  days: number;
+  monthlyCredits: number;
+  features: string[];
+}
+
+export interface PackDef {
+  id: string;
+  name: string;
+  priceCents: number;
+  credits: number;
+}
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  displayName: string;
+  plan: string;
 }
 
 export const api = {
@@ -208,7 +267,11 @@ export const api = {
   uploadClientFiles: (clientId: string, files: File[]) => {
     const form = new FormData();
     for (const f of files) form.append("files", f);
-    return fetch(`/api/workbench/clients/${clientId}/files`, { method: "POST", body: form }).then(
+    return fetch(`/api/workbench/clients/${clientId}/files`, {
+      method: "POST",
+      headers: authHeaders(),
+      body: form,
+    }).then(
       async (resp) => {
         if (!resp.ok) {
           const detail = await resp.json().catch(() => ({}));
@@ -289,6 +352,60 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ query, clientId }),
     }),
+
+  // ---------- 登录与计费 ----------
+
+  authRegister: (username: string, password: string) =>
+    req<{ token: string; user: AuthUser }>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+
+  authLogin: (username: string, password: string) =>
+    req<{ token: string; user: AuthUser }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    }),
+
+  authMe: () => req<AuthUser>("/api/auth/me"),
+
+  billingPlans: () =>
+    req<{ plans: PlanDef[]; packs: PackDef[]; tokensPerCredit: number; stripe: boolean }>(
+      "/api/billing/plans"
+    ),
+
+  billingStatus: () => req<BillingStatus>("/api/billing/status"),
+
+  billingCheckout: (item: string) =>
+    req<{ orderId: string; checkoutUrl: string | null; demo: boolean; status?: BillingStatus }>(
+      "/api/billing/checkout",
+      { method: "POST", body: JSON.stringify({ item }) }
+    ),
+
+  billingRedeem: (code: string) =>
+    req<{ ok: boolean; status: BillingStatus }>("/api/billing/redeem", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  billingLedger: () =>
+    req<{ id: string; deltaCredits: number; source: string; ref: string; createdAt: string }[]>(
+      "/api/billing/ledger"
+    ),
+
+  billingOrders: () =>
+    req<
+      {
+        id: string;
+        item: string;
+        itemName: string;
+        amountCents: number;
+        channel: string;
+        status: string;
+        createdAt: string;
+        paidAt: string | null;
+      }[]
+    >("/api/billing/orders"),
 };
 
 export interface ChatStreamHandlers {
@@ -307,7 +424,7 @@ export async function chatStream(
 ): Promise<{ citations: Citation[]; toolEvents: ToolEvent[]; content?: string }> {
   const resp = await fetch("/api/workbench/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ clientId, message }),
   });
   if (!resp.ok || !resp.body) {

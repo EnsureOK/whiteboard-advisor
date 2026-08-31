@@ -311,10 +311,30 @@ class User(Base):
     # pbkdf2_sha256$iterations$salt_hex$hash_hex
     password_hash: Mapped[str] = mapped_column(String(200))
     display_name: Mapped[str] = mapped_column(String(60), default="")
-    # free / pro
+    # free / basic / pro / max
     plan: Mapped[str] = mapped_column(String(20), default="free", index=True)
     # ISO 时间;null 表示免费版无期限
     plan_expires_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    # 积分余额,以 token 为最小记账单位(1 积分=2000 tokens,展示时换算)
+    # plan 池:套餐月赠,发放时清零重置;pack 池:积分包购买,永不过期
+    credit_tokens_plan: Mapped[int] = mapped_column(Integer, default=0)
+    credit_tokens_pack: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
+
+
+class CreditLedger(Base):
+    """积分流水:发放/消耗,以 token 计。"""
+
+    __tablename__ = "credit_ledger"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    # 正=发放,负=消耗
+    delta_tokens: Mapped[int] = mapped_column(Integer)
+    # signup_grant / plan_grant / pack_grant / redeem_grant / consume
+    source: Mapped[str] = mapped_column(String(20), index=True)
+    # 关联说明: 订单 id / 消耗场景(chat/task/embedding)等
+    ref: Mapped[str] = mapped_column(String(120), default="")
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
 
 
@@ -335,6 +355,8 @@ class Order(Base):
     status: Mapped[str] = mapped_column(String(20), default="created", index=True)
     # 兑换码 / 微信支付单号等
     meta_json: Mapped[str] = mapped_column(Text, default="{}")
+    # Stripe Checkout Session id(幂等履约凭据)
+    stripe_session_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
     paid_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 

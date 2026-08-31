@@ -211,15 +211,20 @@ def seed() -> None:
         from app.db_models import RedeemCode, User
         from app.services.auth import hash_password
 
-        if not db.query(User).filter(User.username == "demo").first():
-            db.add(
-                User(
-                    username="demo",
-                    password_hash=hash_password("demo123456"),
-                    display_name="演示经纪人",
-                    plan="free",
-                )
+        demo_user = db.query(User).filter(User.username == "demo").first()
+        if not demo_user:
+            demo_user = User(
+                username="demo",
+                password_hash=hash_password("demo123456"),
+                display_name="演示经纪人",
+                plan="free",
             )
+            db.add(demo_user)
+            db.commit()
+            db.refresh(demo_user)
+        from app.api.billing import grant_signup_bonus
+
+        grant_signup_bonus(db, demo_user)
         demo_codes = ["PRO-DEMO-0001", "PRO-DEMO-0002", "PRO-YEAR-0001"]
         for code, plan, days in [
             (demo_codes[0], "pro", 30),

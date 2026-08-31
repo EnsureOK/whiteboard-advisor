@@ -326,11 +326,13 @@ async def run_agent_stream(
                 if delta:
                     yield {"type": "delta", "text": delta}
 
+    usage = getattr(result.context_wrapper, "usage", None)
     yield {
         "type": "final",
         "content": str(result.final_output or ""),
         "citations": deps.citations,
         "toolEvents": deps.tool_events,
+        "usageTokens": int(getattr(usage, "total_tokens", 0) or 0),
     }
 
 

@@ -117,6 +117,21 @@
   padding: 0;
 }
 .wb-rail-foot { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.wb-rail-credits {
+  min-width: 34px;
+  height: 26px;
+  padding: 0 4px;
+  border-radius: 7px;
+  border: 1px solid var(--w-line);
+  background: var(--w-surface);
+  color: var(--w-muted);
+  font-size: 10.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.13s ease, border-color 0.13s ease;
+}
+.wb-rail-credits:hover, .wb-rail-credits.active { color: var(--w-ink); border-color: var(--w-faint); }
 .wb-live-dot {
   width: 7px;
   height: 7px;
@@ -840,6 +855,91 @@
 .wb-hit-head { display: flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 550; }
 .wb-hit-score { color: var(--w-muted); font-size: 11px; font-family: var(--w-mono); margin-left: auto; }
 .wb-hit-text { font-size: 12px; color: var(--w-muted); margin-top: 4px; white-space: pre-wrap; max-height: 110px; overflow-y: auto; }
+
+/* ---------- 计费视图 ---------- */
+
+.wb-billing { flex: 1; overflow-y: auto; background: var(--w-surface); min-width: 0; }
+.wb-billing-inner { max-width: 880px; margin: 0 auto; padding: 28px 24px 60px; }
+.wb-login-card {
+  max-width: 340px;
+  margin: 40px auto 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: var(--w-shadow-card);
+}
+.wb-bill-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.wb-bill-user { font-size: 15px; font-weight: 650; }
+.wb-bill-plan { font-size: 12px; color: var(--w-muted); margin-top: 2px; }
+.wb-bill-balance {
+  display: flex;
+  gap: 26px;
+  align-items: center;
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 22px;
+  background: var(--w-bg);
+}
+.wb-bill-total { display: flex; flex-direction: column; }
+.wb-bill-total .wb-mono { font-size: 28px; font-weight: 650; letter-spacing: -0.01em; }
+.wb-bill-total label { font-size: 11.5px; color: var(--w-muted); }
+.wb-bill-rows { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--w-ink); }
+.wb-bill-rows .wb-mono { font-weight: 550; }
+.wb-bill-rows em { font-style: normal; color: var(--w-faint); font-size: 11px; margin-left: 4px; }
+.wb-bill-section { font-size: 12px; font-weight: 650; letter-spacing: 0.04em; color: var(--w-muted); margin: 22px 0 10px; }
+.wb-bill-note { font-weight: 400; letter-spacing: 0; color: var(--w-faint); margin-left: 6px; }
+.wb-plan-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.wb-plan-card {
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--w-surface);
+  transition: border-color 0.13s ease, box-shadow 0.13s ease;
+}
+.wb-plan-card:hover { border-color: var(--w-faint); box-shadow: var(--w-shadow-card); }
+.wb-plan-card.current { border-color: var(--w-ink); }
+.wb-plan-name { font-size: 13px; font-weight: 650; }
+.wb-plan-price { font-size: 22px; font-weight: 650; }
+.wb-plan-price span { font-size: 12px; font-weight: 400; color: var(--w-muted); }
+.wb-plan-credits { font-size: 12px; color: var(--w-ink); }
+.wb-plan-card ul { list-style: none; padding: 0; margin: 4px 0 10px; display: flex; flex-direction: column; gap: 4px; }
+.wb-plan-card li { font-size: 12px; color: var(--w-muted); display: flex; gap: 6px; align-items: flex-start; }
+.wb-plan-card li svg { color: var(--w-ok); flex-shrink: 0; margin-top: 3px; }
+.wb-plan-card .wb-btn { margin-top: auto; justify-content: center; }
+.wb-pack-cards { display: flex; flex-direction: column; gap: 6px; max-width: 520px; }
+.wb-pack-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  padding: 9px 14px;
+}
+.wb-pack-name { font-size: 12.5px; font-weight: 550; min-width: 64px; }
+.wb-pack-card .wb-text-input { flex: 1; }
+.wb-pack-card .wb-btn { margin-left: auto; }
+.wb-ledger { display: flex; flex-direction: column; max-width: 640px; }
+.wb-ledger-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 12px;
+  padding: 4.5px 2px;
+  border-bottom: 1px solid var(--w-line-soft);
+  color: var(--w-ink);
+}
+.wb-ledger-delta { min-width: 64px; text-align: right; font-weight: 550; }
+.wb-ledger-delta.pos { color: var(--w-ok-ink); }
+.wb-ledger-delta.neg { color: var(--w-ink); }
+.wb-ledger-ref { color: var(--w-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.wb-ledger-time { color: var(--w-faint); font-size: 11px; }
 
 /* ---------- 响应式:窄视口保中栏 ---------- */
 

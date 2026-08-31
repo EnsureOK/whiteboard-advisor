@@ -35,7 +35,6 @@ from app.db_models import (
 from app.services import auth as auth_svc
 from app.services import kb, task_engine
 from app.services import workbench_store as store
-from app.api.billing import billing_status
 
 logger = logging.getLogger("whiteboard-advisor.workbench")
 
@@ -473,16 +472,26 @@ def _sse(obj: dict) -> str:
 
 
 @router.post("/chat")
-async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
+async def chat(
+    body: ChatBody,
+    db: OrmSession = Depends(get_db),
+    user: Optional[User] = Depends(auth_svc.get_optional_user),
+):
     """流式对话。
 
     注意:FastAPI 的 yield 依赖会在响应体开始发送前关闭 db session,
     所以生成器内部一律使用自建 session(SessionLocal),不复用注入的 db。
     """
+    from app.services import credits
+
     c = _get_client_or_404(db, body.clientId)
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "empty message")
+    # 已登录用户余额拦截;未登录为演示模式(不扣不拦)
+    if user and not credits.has_credits(db, user):
+        raise HTTPException(402, "积分不足:请续费套餐或购买积分包")
+    user_id = user.id if user else None
 
     db.add(WorkMessage(client_id=c.id, role="user", content=message))
     db.commit()
@@ -510,6 +519,7 @@ async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
                 citations: list = []
                 tool_events: list = []
                 buffer: list[str] = []
+                usage_tokens = 0
                 try:
                     async for ev in run_agent_stream(db2, c2, history, message):
                         if ev["type"] == "delta":
@@ -520,13 +530,14 @@ async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
                         elif ev["type"] == "final":
                             citations = ev["citations"]
                             tool_events = ev["toolEvents"]
+                            usage_tokens = ev.get("usageTokens", 0)
                             if not buffer and ev["content"]:
                                 # 个别模型不走增量:最终文本一次性补发
                                 buffer.append(ev["content"])
                                 yield _sse({"type": "delta", "text": ev["content"]})
                 except Exception as e:  # noqa: BLE001 agent 失败降级为纯 RAG 回答
                     logger.warning("agent stream failed, fallback to rag: %s", e)
-                    async for chunk in _rag_fallback_stream(db2, c2, history, message, buffer):
+                    async for chunk in _rag_fallback_stream(db2, c2, history, message, buffer, user_id):
                         yield chunk
                     return
                 from app.services.agent import strip_fake_tool_calls
@@ -537,6 +548,7 @@ async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
                 saved.tool_events_json = json.dumps(tool_events, ensure_ascii=False)
                 db2.add(saved)
                 db2.commit()
+                _consume_usage(db2, user_id, usage_tokens, "chat:agent")
                 yield _sse({
                     "type": "done",
                     "content": full,
@@ -546,7 +558,7 @@ async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
                 })
 
             elif mode == "rag":
-                async for chunk in _rag_fallback_stream(db2, c2, history, message, []):
+                async for chunk in _rag_fallback_stream(db2, c2, history, message, [], user_id):
                     yield chunk
 
             else:
@@ -572,8 +584,24 @@ async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+def _consume_usage(db: OrmSession, user_id: Optional[str], usage_tokens: int, ref: str) -> None:
+    """按实际 usage 扣积分;未登录(演示模式)不扣。"""
+    if not user_id or usage_tokens <= 0:
+        return
+    from app.services import credits
+
+    u = db.get(User, user_id)
+    if u:
+        credits.consume(db, u, usage_tokens, ref=ref)
+
+
 async def _rag_fallback_stream(
-    db: OrmSession, c: Client, history: list[dict], message: str, already: list[str]
+    db: OrmSession,
+    c: Client,
+    history: list[dict],
+    message: str,
+    already: list[str],
+    user_id: Optional[str] = None,
 ):
     """agent 不可用/失败时的纯 RAG 流式回答。
 
@@ -602,8 +630,12 @@ async def _rag_fallback_stream(
         messages.append({"role": "user", "content": message})
 
     buffer: list[str] = []
+    usage_tokens = 0
     try:
         async for typ, payload in _call_qianfan_stream(messages, settings.model_fast):
+            if typ == "usage":
+                usage_tokens = int(payload.get("total_tokens", 0) or 0)
+                continue
             if typ != "delta":
                 continue
             buffer.append(payload)
@@ -616,6 +648,7 @@ async def _rag_fallback_stream(
     saved.citations_json = json.dumps(citations, ensure_ascii=False)
     db.add(saved)
     db.commit()
+    _consume_usage(db, user_id, usage_tokens, "chat:rag")
     yield _sse({"type": "done", "citations": citations, "messageId": saved.id})
 
 
@@ -628,11 +661,12 @@ async def create_task(
     user: Optional[User] = Depends(auth_svc.get_optional_user),
 ) -> dict:
     c = _get_client_or_404(db, body.clientId)
-    # 免费版月度配额(未登录演示不限制)
+    # 已登录用户按积分余额拦截(未登录演示不限制)
     if user:
-        st = billing_status(db, user)
-        if st["taskQuota"] != -1 and st["taskRemaining"] <= 0:
-            raise HTTPException(402, f"本月 {st['taskQuota']} 次任务额度已用完,升级专业版可不限次数")
+        from app.services import credits
+
+        if not credits.has_credits(db, user):
+            raise HTTPException(402, "积分不足:请续费套餐或购买积分包")
     plan = task_engine.build_plan(body.kind, c, body.message or "")
     title = body.title or f"{c.name}·{(body.message or body.kind)[:40]}"
     task = Task(

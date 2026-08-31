@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     qianfan_api_key: str = ""
     qianfan_base_url: str = "https://qianfan.baidubce.com/v2"
     # 交互轮(意图+zone+解说)用快模型,复杂规划用 deep 模型
-    qianfan_model_fast: str = "ernie-4.5-turbo-128k"
-    qianfan_model_deep: str = "ernie-4.5-turbo-128k"
+    qianfan_model_fast: str = "glm-5.3-flash"
+    qianfan_model_deep: str = "glm-5.3-flash"
     # 兼容旧配置:QIANFAN_MODEL 若设置则作为 deep 模型
     qianfan_model: str = ""
 
@@ -20,6 +20,10 @@ class Settings(BaseSettings):
 
     # 登录态 JWT 密钥(生产务必在 .env 里设置 JWT_SECRET)
     jwt_secret: str = ""
+
+    # Stripe(支付宝/微信;沙盒 key 开发,生产换正式 key + Dashboard 开通支付方式)
+    stripe_api_key: str = ""
+    stripe_webhook_secret: str = ""
 
     # 百度智能云语音 (ASR/TTS, API_KEY + SECRET_KEY -> access_token)
     baidu_speech_api_key: str = ""
