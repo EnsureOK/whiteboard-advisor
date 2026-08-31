@@ -43,6 +43,7 @@ TOOL_LABELS = {
     "get_client_profile": "调取客户档案",
     "list_policies": "调取托管保单",
     "calc_coverage_gaps": "计算保障缺口",
+    "generate_document": "生成文档工件",
 }
 
 
@@ -228,13 +229,41 @@ def build_agent():
             lines.append("(该客户暂无托管保单,以上按零保障与建议基线计算)")
         return "\n".join(lines)
 
+    @function_tool
+    async def generate_document(ctx: RunContextWrapper[AgentDeps], kind: str) -> str:
+        """为当前客户生成一份文档工件,产出后经纪人可在右侧工作区下载 Word/PPT。
+
+        Args:
+            kind: 文档类型,plan=保障方案书 / visit=面谈提纲 / followup=跟进消息。
+        """
+        from app.services import task_engine
+
+        deps = ctx.context
+        kind_map = {"plan": "generate_plan", "visit": "prepare_visit", "followup": "followup"}
+        task_kind = kind_map.get(kind, "followup")
+        doc_type, title, content = await task_engine.compose_doc(deps.db, deps.client, task_kind)
+        artifact = task_engine._save_artifact(  # noqa: SLF001 复用任务引擎的版本管理
+            deps.db, deps.client, None, doc_type, title, content
+        )
+        deps.tool_events.append(
+            {
+                "name": "generate_document",
+                "label": TOOL_LABELS["generate_document"],
+                "summary": f"《{artifact.title}》 v{artifact.version}",
+            }
+        )
+        return (
+            f"已生成工件《{artifact.title}》第 {artifact.version} 版,包含 {len(content['sections'])} 个小节,"
+            "经纪人可在右侧工作区查看并下载 Word/PPT。"
+        )
+
     from agents import Agent as _Agent
 
     return _Agent(
         name="broker-assistant",
         instructions=lambda ctx, agent: _build_instructions(ctx.context.client),
         model=model,
-        tools=[search_knowledge, get_client_profile, list_policies, calc_coverage_gaps],
+        tools=[search_knowledge, get_client_profile, list_policies, calc_coverage_gaps, generate_document],
     )
 
 

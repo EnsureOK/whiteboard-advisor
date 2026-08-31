@@ -704,6 +704,33 @@ async def confirm_task_event(task_id: str, body: ConfirmBody, db: OrmSession = D
 
 # ---------- Artifacts ----------
 
+@router.get("/artifacts/{artifact_id}/export")
+async def export_artifact(artifact_id: str, fmt: str, db: OrmSession = Depends(get_db)):
+    """把工件导出为真实办公文件:矩阵→xlsx,文档→docx/pptx。"""
+    from urllib.parse import quote
+
+    from fastapi.responses import Response
+
+    from app.services import office
+
+    a = db.get(Artifact, kb.check_id(artifact_id, "artifact id"))
+    if not a:
+        raise HTTPException(404, "artifact not found")
+    if fmt not in office.MEDIA_TYPES:
+        raise HTTPException(400, "fmt 必须是 xlsx / docx / pptx")
+    content = json.loads(a.content_json or "{}")
+    try:
+        data = office.export_artifact(a.type, a.title, content, fmt)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    filename = f"{a.title}-v{a.version}.{fmt}"
+    return Response(
+        content=data,
+        media_type=office.MEDIA_TYPES[fmt],
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
 @router.get("/artifacts")
 async def list_artifacts(clientId: str, db: OrmSession = Depends(get_db)) -> list[dict]:
     rows = (

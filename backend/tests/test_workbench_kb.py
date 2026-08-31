@@ -262,6 +262,59 @@ def test_company_review_uses_company_cols(api_client, test_db):
     assert content["rows"][0]["cells"]["企业财产"]["level"] == "ok"
 
 
+def test_doc_compose_and_office_export(api_client, test_db):
+    """generate_plan 任务(无 LLM 走模板)产出 doc 工件,可导出 docx/pptx;矩阵可导出 xlsx。"""
+    from app.db_models import Client, Member, Policy
+
+    c = Client(name="文档客户", client_type="family")
+    test_db.add(c)
+    test_db.flush()
+    m = Member(client_id=c.id, name="老王", relation="本人", seq=0)
+    test_db.add(m)
+    test_db.flush()
+    test_db.add(Policy(client_id=c.id, member_id=m.id, line="重疾险", product_name="测试重疾", amount=500_000))
+    test_db.commit()
+
+    r = api_client.post("/api/workbench/tasks", json={"clientId": c.id, "kind": "generate_plan"})
+    task = r.json()
+    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={})
+    for _ in range(8):
+        s = api_client.post(f"/api/workbench/tasks/{task['id']}/step").json()
+        if s["awaiting"]:
+            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"]})
+        elif s["taskStatus"] == "done":
+            break
+
+    arts = api_client.get("/api/workbench/artifacts", params={"clientId": c.id}).json()
+    doc = next(a for a in arts if a["type"] == "plan_doc")
+    assert doc["content"]["kind"] == "doc" and len(doc["content"]["sections"]) >= 3
+
+    # Office 导出:docx/pptx/xlsx 都是 zip 容器,以 PK 开头
+    for fmt in ("docx", "pptx"):
+        resp = api_client.get(f"/api/workbench/artifacts/{doc['id']}/export", params={"fmt": fmt})
+        assert resp.status_code == 200
+        assert resp.content[:2] == b"PK"
+        assert "attachment" in resp.headers["content-disposition"]
+
+    bad = api_client.get(f"/api/workbench/artifacts/{doc['id']}/export", params={"fmt": "xlsx"})
+    assert bad.status_code == 400  # 文档类不支持 xlsx
+
+    # 矩阵 -> xlsx
+    r = api_client.post("/api/workbench/tasks", json={"clientId": c.id, "kind": "policy_review"})
+    task = r.json()
+    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={})
+    for _ in range(8):
+        s = api_client.post(f"/api/workbench/tasks/{task['id']}/step").json()
+        if s["awaiting"]:
+            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"]})
+        elif s["taskStatus"] == "done":
+            break
+    arts = api_client.get("/api/workbench/artifacts", params={"clientId": c.id}).json()
+    matrix = next(a for a in arts if a["type"] == "review_matrix")
+    resp = api_client.get(f"/api/workbench/artifacts/{matrix['id']}/export", params={"fmt": "xlsx"})
+    assert resp.status_code == 200 and resp.content[:2] == b"PK"
+
+
 def asyncio_run(coro):
     import asyncio
 

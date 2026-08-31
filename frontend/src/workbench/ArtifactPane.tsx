@@ -11,8 +11,24 @@ interface Props {
 const TYPE_ICON: Record<string, IconName> = {
   review_matrix: "table",
   plan_doc: "fileText",
+  visit_outline: "users",
+  followup_msg: "pen",
   checklist: "listChecks",
   report: "chart",
+};
+
+/** 工件类型 -> 可下载的办公文件格式 */
+const TYPE_EXPORTS: Record<string, { fmt: string; label: string }[]> = {
+  review_matrix: [{ fmt: "xlsx", label: "Excel" }],
+  plan_doc: [
+    { fmt: "docx", label: "Word" },
+    { fmt: "pptx", label: "PPT" },
+  ],
+  visit_outline: [
+    { fmt: "docx", label: "Word" },
+    { fmt: "pptx", label: "PPT" },
+  ],
+  followup_msg: [{ fmt: "docx", label: "Word" }],
 };
 
 /** 右栏:工作区(工件列表 + 保单检视矩阵视图 + 导出) */
@@ -57,8 +73,16 @@ export default function ArtifactPane({ artifacts, running }: Props) {
 function ArtifactView({ artifact }: { artifact: ArtifactOut }) {
   const content = artifact.content || {};
   const isMatrix = content.kind === "review_matrix";
+  const isDoc = content.kind === "doc";
 
   const exportText = useMemo(() => {
+    if (isDoc) {
+      const lines = [`《${artifact.title}》`, content.summary || ""];
+      for (const sec of content.sections || []) {
+        lines.push(`\n【${sec.heading}】\n${sec.body}`);
+      }
+      return lines.join("\n");
+    }
     if (!isMatrix) return JSON.stringify(content, null, 2);
     const lines = [`《${artifact.title}》`, content.summary || ""];
     for (const row of content.rows || []) {
@@ -72,7 +96,7 @@ function ArtifactView({ artifact }: { artifact: ArtifactOut }) {
       lines.push(`\n附注: ${ex.line} ${ex.productName || ""} 保额 ${(ex.amount / 10000).toFixed(0)} 万`);
     }
     return lines.join("\n");
-  }, [artifact, isMatrix]);
+  }, [artifact, isMatrix, isDoc]);
 
   const exportPdf = () => {
     const win = window.open("", "_blank");
@@ -120,14 +144,30 @@ function ArtifactView({ artifact }: { artifact: ArtifactOut }) {
               </div>
             )}
           </>
+        ) : isDoc ? (
+          <div className="wb-doc">
+            {(content.sections || []).map((sec: any, i: number) => (
+              <section key={i}>
+                <div className="wb-doc-heading">{sec.heading}</div>
+                <div className="wb-doc-body">{sec.body}</div>
+              </section>
+            ))}
+          </div>
         ) : (
           <pre style={{ whiteSpace: "pre-wrap", fontSize: 12.5 }}>{exportText}</pre>
         )}
       </div>
       <div className="wb-artifact-actions">
-        <button className="wb-btn" onClick={exportPdf}>
-          <Icon name="download" size={13} /> 导出 PDF
-        </button>
+        {(TYPE_EXPORTS[artifact.type] || []).map((e) => (
+          <button
+            key={e.fmt}
+            className="wb-btn"
+            onClick={() => window.open(`/api/workbench/artifacts/${artifact.id}/export?fmt=${e.fmt}`)}
+          >
+            <Icon name="download" size={13} /> {e.label}
+          </button>
+        ))}
+        <button className="wb-btn ghost" onClick={exportPdf}>PDF</button>
         <button className="wb-btn ghost" onClick={sendToWechat}>
           <Icon name="send" size={13} /> 发微信
         </button>

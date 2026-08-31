@@ -118,6 +118,10 @@ export default function Workbench() {
         // 服务端可能清洗过全文(剔除伪工具调用),以它为准
         ...(content !== undefined ? { content } : {}),
       }));
+      // agent 可能在对话中生成了工件(generate_document)
+      if (toolEvents.some((t) => t.name === "generate_document")) {
+        await refreshArtifacts();
+      }
     } catch (e: any) {
       showToast(`对话失败: ${e.message}`);
     } finally {

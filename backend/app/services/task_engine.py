@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Optional
 
 from sqlalchemy.orm import Session as OrmSession
 
@@ -247,36 +248,163 @@ def _run_gap_calc(db: OrmSession, task: Task, client: Client) -> dict:
     }
 
 
-async def _run_compose(db: OrmSession, task: Task, client: Client) -> tuple[Artifact, dict]:
-    gap = _run_gap_calc(db, task, client)
-    if gap["policyCount"] == 0:
-        summary = "该客户暂无托管保单,矩阵按零保障与建议基线计算;录入保单后重新检视可得到真实缺口。"
-    else:
-        summary = f"基于 {gap['policyCount']} 份托管保单与建议保额基线计算;基线为演示值,正式版按收入/负债/年龄推算。"
-    content = {
-        "kind": "review_matrix",
-        "clientId": client.id,
-        "cols": gap["cols"],
-        "rows": gap["rows"],
-        "extras": gap["extras"],
-        "summary": summary,
-        "generatedAt": utcnow_iso(),
-    }
-    # 同类型工件版本递增
+def _save_artifact(db: OrmSession, client: Client, task_id: str | None, type_: str, title: str, content: dict) -> Artifact:
+    """保存工件,同类型版本递增。"""
     existing = db.query(Artifact).filter(Artifact.client_id == client.id).all()
-    same_type = [a for a in existing if a.type == "review_matrix"]
+    same_type = [a for a in existing if a.type == type_]
     artifact = Artifact(
         client_id=client.id,
-        task_id=task.id,
-        type="review_matrix",
-        title=f"{client.name}·保单检视矩阵",
+        task_id=task_id,
+        type=type_,
+        title=title,
         version=(max(a.version for a in same_type) + 1) if same_type else 1,
         content_json=json.dumps(content, ensure_ascii=False),
     )
     db.add(artifact)
     db.commit()
     db.refresh(artifact)
+    return artifact
+
+
+async def _run_compose(db: OrmSession, task: Task, client: Client) -> tuple[Artifact, dict]:
+    if task.kind == "policy_review":
+        gap = _run_gap_calc(db, task, client)
+        if gap["policyCount"] == 0:
+            summary = "该客户暂无托管保单,矩阵按零保障与建议基线计算;录入保单后重新检视可得到真实缺口。"
+        else:
+            summary = f"基于 {gap['policyCount']} 份托管保单与建议保额基线计算;基线为演示值,正式版按收入/负债/年龄推算。"
+        content = {
+            "kind": "review_matrix",
+            "clientId": client.id,
+            "cols": gap["cols"],
+            "rows": gap["rows"],
+            "extras": gap["extras"],
+            "summary": summary,
+            "generatedAt": utcnow_iso(),
+        }
+        artifact = _save_artifact(db, client, task.id, "review_matrix", f"{client.name}·保单检视矩阵", content)
+        return artifact, content
+
+    doc_type, title, content = await compose_doc(db, client, task.kind)
+    artifact = _save_artifact(db, client, task.id, doc_type, title, content)
     return artifact, content
+
+
+# ---------- 文档类工件(方案书/面谈提纲/跟进):LLM 起草 + 模板兜底 ----------
+
+_DOC_SPECS = {
+    "generate_plan": ("plan_doc", "保障方案书", "为客户草拟一份保障方案书"),
+    "prepare_visit": ("visit_outline", "面谈提纲", "为下次面谈准备提纲与提问清单"),
+    "followup": ("followup_msg", "跟进消息", "起草一条面谈后的客户跟进消息"),
+}
+
+
+def _doc_facts(db: OrmSession, client: Client) -> str:
+    """给 LLM 的事实底料:档案+保单+缺口+事项。"""
+    snap = _client_snapshot(db, client)
+    gap = _run_gap_calc(db, None, client)
+    lines = [f"客户: {client.name} ({client.client_type})"]
+    for m in snap["members"]:
+        lines.append(f"- 成员 {m['name']} {m['relation']} 生日{m['birthday'] or '未知'} {m['notes'] or ''}")
+    for p in client.policies:
+        lines.append(f"- 保单 {p.line}《{p.product_name}》保额{p.amount // 10000}万 状态{p.status} 到期{p.expiry_date or '长期'}")
+    for e in snap["engagements"]:
+        lines.append(f"- 进行中 {e['kind']}: {e['title']} {e['line']}")
+    for row in gap["rows"]:
+        cells = "; ".join(f"{col}{cell['text']}" for col, cell in row["cells"].items())
+        lines.append(f"- 缺口 {row['member']}: {cells}")
+    lines.append(f"- 备注: {client.notes or '无'}")
+    return "\n".join(lines)
+
+
+async def _draft_sections_llm(db: OrmSession, client: Client, kind: str) -> Optional[dict]:
+    """千帆起草文档 JSON;不可用或解析失败返回 None。"""
+    from app.config import settings
+
+    if not settings.has_llm:
+        return None
+    try:
+        from app.services.agent import load_soul
+        from app.services.llm import _call_qianfan
+
+        _, _, goal = _DOC_SPECS[kind]
+        prompt = (
+            f"{load_soul()}\n\n"
+            f"任务: {goal}。基于以下事实(不得编造数字):\n{_doc_facts(db, client)}\n\n"
+            '只输出 JSON,格式: {"summary": "一句话摘要", "sections": [{"heading": "小节标题", "body": "正文,要点用 - 开头分行"}]}\n'
+            "3-5 个小节;方案书需含现状分析/缺口与建议/预算与节奏;面谈提纲需含目标/要点/提问清单;跟进消息只需 1-2 节,口吻可直接发给客户。"
+        )
+        raw, _usage = await _call_qianfan([{"role": "user", "content": prompt}], settings.model_deep)
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        data = json.loads(raw[start : end + 1])
+        sections = data.get("sections")
+        if not isinstance(sections, list) or not sections:
+            return None
+        return {
+            "summary": str(data.get("summary", ""))[:300],
+            "sections": [
+                {"heading": str(s.get("heading", ""))[:80], "body": str(s.get("body", ""))[:2000]}
+                for s in sections[:6]
+            ],
+        }
+    except Exception as e:  # noqa: BLE001 起草失败走模板
+        logger.warning("llm draft failed for %s: %s", kind, e)
+        return None
+
+
+def _template_sections(db: OrmSession, client: Client, kind: str) -> dict:
+    gap = _run_gap_calc(db, None, client)
+    gaps_text = "\n".join(
+        f"- {row['member']}: " + "; ".join(f"{col}{cell['text']}" for col, cell in row["cells"].items())
+        for row in gap["rows"]
+    )
+    policies_text = "\n".join(
+        f"- {p.line}《{p.product_name}》 保额 {p.amount // 10000} 万" for p in client.policies
+    ) or "- 暂无托管保单"
+    if kind == "generate_plan":
+        return {
+            "summary": f"基于 {len(client.policies)} 份托管保单与保障缺口盘点的初步方案框架。",
+            "sections": [
+                {"heading": "现状盘点", "body": policies_text},
+                {"heading": "缺口与建议", "body": gaps_text},
+                {"heading": "预算与节奏", "body": "- 与客户确认年度预算区间\n- 优先补齐高缺口维度\n- 分两期配置,先保障后储蓄"},
+            ],
+        }
+    if kind == "prepare_visit":
+        return {
+            "summary": "面谈目标、讲解要点与提问清单。",
+            "sections": [
+                {"heading": "面谈目标", "body": "- 对齐保障缺口认知\n- 确认预算与偏好\n- 约定下一步动作"},
+                {"heading": "讲解要点", "body": gaps_text},
+                {"heading": "提问清单", "body": "- 近一年健康状况是否有变化?\n- 年度可支配预算范围?\n- 对已有保单的疑问?"},
+            ],
+        }
+    return {
+        "summary": "面谈后的跟进消息草稿,可直接转发客户。",
+        "sections": [
+            {
+                "heading": "跟进消息",
+                "body": f"{client.name.rstrip('一家')}您好,感谢今天的沟通。我把咱们聊到的保障要点整理好了,附上检视结果与建议,您方便时看一下;有任何问题随时找我。",
+            }
+        ],
+    }
+
+
+async def compose_doc(db: OrmSession, client: Client, kind: str) -> tuple[str, str, dict]:
+    """产出文档类工件内容: (artifact_type, title, content)。"""
+    doc_type, doc_name, _goal = _DOC_SPECS.get(kind, _DOC_SPECS["followup"])
+    draft = await _draft_sections_llm(db, client, kind) or _template_sections(db, client, kind)
+    content = {
+        "kind": "doc",
+        "docType": doc_type,
+        "clientId": client.id,
+        "summary": draft.get("summary", ""),
+        "sections": draft.get("sections", []),
+        "generatedAt": utcnow_iso(),
+    }
+    return doc_type, f"{client.name}·{doc_name}", content
 
 
 async def execute_step(db: OrmSession, task: Task) -> tuple[TaskEvent, bool]:
