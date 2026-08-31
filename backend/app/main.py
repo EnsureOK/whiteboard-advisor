@@ -3,9 +3,14 @@ import logging
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.auth_api import router as auth_router
+from app.api.billing import router as billing_router
 from app.api.broker_portal import router as broker_router
+from app.api.kb_admin import router as kb_router
 from app.api.session_ws import router as session_router
+from app.api.workbench import router as workbench_router
 from app.config import settings
+from app.db import init_db
 from app.services import pdf_export, session_store, zone_engine
 
 logging.basicConfig(level=logging.INFO)
@@ -21,8 +26,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+init_db()
+
 app.include_router(session_router)
 app.include_router(broker_router)
+app.include_router(workbench_router)
+app.include_router(kb_router)
+app.include_router(auth_router)
+app.include_router(billing_router)
 
 
 @app.get("/health")

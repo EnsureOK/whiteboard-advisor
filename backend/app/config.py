@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     # 兼容旧配置:QIANFAN_MODEL 若设置则作为 deep 模型
     qianfan_model: str = ""
 
+    # 知识库向量化的 embedding 模型(千帆 v2 OpenAI 兼容 /embeddings)
+    qianfan_embedding_model: str = "bge-large-zh"
+
+    # 登录态 JWT 密钥(生产务必在 .env 里设置 JWT_SECRET)
+    jwt_secret: str = ""
+
     # 百度智能云语音 (ASR/TTS, API_KEY + SECRET_KEY -> access_token)
     baidu_speech_api_key: str = ""
     baidu_speech_secret_key: str = ""
