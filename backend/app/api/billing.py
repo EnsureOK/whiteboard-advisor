@@ -235,25 +235,23 @@ async def stripe_webhook(request: Request, db: OrmSession = Depends(get_db)) -> 
 
     try:
         if settings.stripe_webhook_secret:
-            event = stripe_mod.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
-        else:  # 本地未配 secret 时信任负载(仅开发)
-            event = json.loads(payload)
+            # 仅验签;数据处理统一用原始 JSON(SDK 对象在不同大版本行为不一)
+            stripe_mod.Webhook.construct_event(payload, sig, settings.stripe_webhook_secret)
+        event = json.loads(payload)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"invalid webhook: {e}")
 
-    etype = event["type"] if isinstance(event, dict) else event.type
-    data = event["data"]["object"] if isinstance(event, dict) else event.data.object
+    etype = event.get("type", "")
+    data = (event.get("data") or {}).get("object") or {}
+    order_id = (data.get("metadata") or {}).get("orderId")
 
     if etype in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
-        payment_status = data.get("payment_status") if isinstance(data, dict) else data.payment_status
-        order_id = (data.get("metadata") or {}).get("orderId") if isinstance(data, dict) else (data.metadata or {}).get("orderId")
-        if payment_status != "unpaid" and order_id:
+        if data.get("payment_status") != "unpaid" and order_id:
             order = db.get(Order, order_id)
             if order and order.status != "paid":
                 _fulfill_order(db, order)
                 logger.info("stripe fulfilled order %s (%s)", order_id, etype)
     elif etype == "checkout.session.async_payment_failed":
-        order_id = (data.get("metadata") or {}).get("orderId") if isinstance(data, dict) else (data.metadata or {}).get("orderId")
         if order_id:
             order = db.get(Order, order_id)
             if order and order.status != "paid":

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import type { Citation, Client, MessageOut, TaskOut } from "./api";
 import { Icon, Spinner } from "./icons";
 import type { IconName } from "./icons";
+import { Markdown } from "./markdown";
 
 interface Props {
   client: Client;
@@ -114,14 +115,18 @@ export default function ChatPane({
                   ))}
                 </div>
               )}
-              <div
-                className={
-                  "wb-bubble" +
-                  (m.role === "assistant" && streaming && idx === messages.length - 1 ? " streaming" : "")
-                }
-              >
-                {m.content}
-              </div>
+              {m.role === "assistant" ? (
+                <div
+                  className={
+                    "wb-bubble" +
+                    (streaming && idx === messages.length - 1 ? " streaming" : "")
+                  }
+                >
+                  <Markdown text={m.content} />
+                </div>
+              ) : (
+                <div className="wb-bubble">{m.content}</div>
+              )}
               {m.role === "assistant" && m.citations.length > 0 && (
                 <div className="wb-cites">
                   {m.citations.map((c, i) => (

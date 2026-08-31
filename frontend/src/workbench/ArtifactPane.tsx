@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { ArtifactOut } from "./api";
 import { Icon, Spinner } from "./icons";
 import type { IconName } from "./icons";
+import { Markdown } from "./markdown";
 
 interface Props {
   artifacts: ArtifactOut[];
@@ -149,7 +150,7 @@ function ArtifactView({ artifact }: { artifact: ArtifactOut }) {
             {(content.sections || []).map((sec: any, i: number) => (
               <section key={i}>
                 <div className="wb-doc-heading">{sec.heading}</div>
-                <div className="wb-doc-body">{sec.body}</div>
+                <Markdown className="wb-doc-body" text={sec.body} />
               </section>
             ))}
           </div>
