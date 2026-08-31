@@ -99,6 +99,21 @@ export default function ChatPane({
 
           {messages.map((m, idx) => (
             <div key={m.id} className={"wb-msg " + m.role}>
+              {m.role === "assistant" && (m.toolEvents?.length || 0) > 0 && (
+                <div className="wb-tools">
+                  {m.toolEvents!.map((t, i) => (
+                    <div key={i} className="wb-tool-row">
+                      {t.running ? (
+                        <Spinner size={11} />
+                      ) : (
+                        <span className="wb-tool-check"><Icon name="check" size={11} strokeWidth={2.6} /></span>
+                      )}
+                      <span className={"wb-tool-name" + (t.running ? " running" : "")}>{t.label}</span>
+                      {t.summary && <span className="wb-tool-sum">{t.summary}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
               <div
                 className={
                   "wb-bubble" +

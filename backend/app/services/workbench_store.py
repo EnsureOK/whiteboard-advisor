@@ -161,7 +161,8 @@ def message_out(m: WorkMessage) -> dict:
         "clientId": m.client_id,
         "role": m.role,
         "content": m.content,
-        "citations": _safe_json(m.citations_json),
+        "citations": _safe_json(m.citations_json) or [],
+        "toolEvents": _safe_json(m.tool_events_json) or [],
         "taskId": m.task_id,
         "createdAt": m.created_at,
     }

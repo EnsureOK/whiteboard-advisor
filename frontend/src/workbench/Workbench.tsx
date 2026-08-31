@@ -86,19 +86,38 @@ export default function Workbench() {
         role: "assistant",
         content: "",
         citations: [],
+        toolEvents: [],
         taskId: null,
         createdAt: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, localAssistant]);
-      const { citations } = await chatStream(client.id, text, (delta) => {
-        acc += delta;
-        setMessages((prev) =>
-          prev.map((m) => (m.id === localAssistant.id ? { ...m, content: acc } : m))
-        );
+      const patchAssistant = (patch: (m: MessageOut) => MessageOut) =>
+        setMessages((prev) => prev.map((m) => (m.id === localAssistant.id ? patch(m) : m)));
+
+      const { citations, toolEvents, content } = await chatStream(client.id, text, {
+        onDelta: (delta) => {
+          acc += delta;
+          patchAssistant((m) => ({ ...m, content: acc }));
+        },
+        onToolStart: (ev) =>
+          patchAssistant((m) => ({ ...m, toolEvents: [...(m.toolEvents || []), ev] })),
+        onToolEnd: (ev) =>
+          patchAssistant((m) => {
+            const list = [...(m.toolEvents || [])];
+            // 把最早一个仍在 running 的同名(或未命名)事件落成完成态
+            const idx = list.findIndex((t) => t.running);
+            if (idx >= 0) list[idx] = { ...ev, running: false };
+            else list.push(ev);
+            return { ...m, toolEvents: list };
+          }),
       });
-      setMessages((prev) =>
-        prev.map((m) => (m.id === localAssistant.id ? { ...m, citations } : m))
-      );
+      patchAssistant((m) => ({
+        ...m,
+        citations,
+        toolEvents,
+        // 服务端可能清洗过全文(剔除伪工具调用),以它为准
+        ...(content !== undefined ? { content } : {}),
+      }));
     } catch (e: any) {
       showToast(`对话失败: ${e.message}`);
     } finally {

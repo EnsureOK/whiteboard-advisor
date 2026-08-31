@@ -117,12 +117,21 @@ export interface ArtifactOut {
   createdAt: string;
 }
 
+export interface ToolEvent {
+  name: string;
+  label: string;
+  summary?: string;
+  /** 仅流式过程中出现:true 表示还在执行 */
+  running?: boolean;
+}
+
 export interface MessageOut {
   id: string;
   clientId: string;
   role: "user" | "assistant";
   content: string;
   citations: Citation[];
+  toolEvents?: ToolEvent[];
   taskId: string | null;
   createdAt: string;
 }
@@ -282,12 +291,20 @@ export const api = {
     }),
 };
 
-/** SSE 流式对话:逐 token 回调,结束时返回引用。 */
+export interface ChatStreamHandlers {
+  onDelta: (text: string) => void;
+  /** agent 开始调用一个工具 */
+  onToolStart?: (ev: ToolEvent) => void;
+  /** 工具执行完,带一行结果摘要 */
+  onToolEnd?: (ev: ToolEvent) => void;
+}
+
+/** SSE 流式对话:逐 token + 工具过程回调,结束时返回引用与工具事件。 */
 export async function chatStream(
   clientId: string,
   message: string,
-  onDelta: (text: string) => void
-): Promise<{ citations: Citation[] }> {
+  handlers: ChatStreamHandlers
+): Promise<{ citations: Citation[]; toolEvents: ToolEvent[]; content?: string }> {
   const resp = await fetch("/api/workbench/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -301,6 +318,8 @@ export async function chatStream(
   const decoder = new TextDecoder();
   let buffer = "";
   let citations: Citation[] = [];
+  let toolEvents: ToolEvent[] = [];
+  let content: string | undefined;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
@@ -312,12 +331,20 @@ export async function chatStream(
       if (!line.startsWith("data:")) continue;
       try {
         const evt = JSON.parse(line.slice(5));
-        if (evt.type === "delta") onDelta(evt.text);
-        if (evt.type === "done") citations = evt.citations || [];
+        if (evt.type === "delta") handlers.onDelta(evt.text);
+        if (evt.type === "tool_start")
+          handlers.onToolStart?.({ name: evt.name, label: evt.label, running: true });
+        if (evt.type === "tool_end")
+          handlers.onToolEnd?.({ name: evt.name, label: evt.label, summary: evt.summary });
+        if (evt.type === "done") {
+          citations = evt.citations || [];
+          toolEvents = evt.toolEvents || [];
+          if (typeof evt.content === "string") content = evt.content;
+        }
       } catch {
         /* 忽略不完整帧 */
       }
     }
   }
-  return { citations };
+  return { citations, toolEvents, content };
 }

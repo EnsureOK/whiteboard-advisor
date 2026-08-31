@@ -468,84 +468,155 @@ MOCK_REPLIES = [
 ]
 
 
+def _sse(obj: dict) -> str:
+    return "data: " + json.dumps(obj, ensure_ascii=False) + "\n\n"
+
+
 @router.post("/chat")
 async def chat(body: ChatBody, db: OrmSession = Depends(get_db)):
+    """流式对话。
+
+    注意:FastAPI 的 yield 依赖会在响应体开始发送前关闭 db session,
+    所以生成器内部一律使用自建 session(SessionLocal),不复用注入的 db。
+    """
     c = _get_client_or_404(db, body.clientId)
     message = body.message.strip()
     if not message:
         raise HTTPException(400, "empty message")
 
-    # 检索知识库(带客户私有库)
+    db.add(WorkMessage(client_id=c.id, role="user", content=message))
+    db.commit()
+
+    history_rows = (
+        db.query(WorkMessage)
+        .filter(WorkMessage.client_id == c.id)
+        .order_by(WorkMessage.created_at)
+        .all()
+    )
+    history = [{"role": m.role, "content": m.content} for m in history_rows if m.content.strip()]
+    client_id = c.id
+    client_name = c.name
+
+    from app.db import SessionLocal
+    from app.services.agent import agent_available, run_agent_stream
+
+    mode = "agent" if agent_available() else ("rag" if settings.has_llm else "mock")
+
+    async def gen():
+        db2 = SessionLocal()
+        try:
+            c2 = db2.get(Client, client_id)
+            if mode == "agent":
+                citations: list = []
+                tool_events: list = []
+                buffer: list[str] = []
+                try:
+                    async for ev in run_agent_stream(db2, c2, history, message):
+                        if ev["type"] == "delta":
+                            buffer.append(ev["text"])
+                            yield _sse({"type": "delta", "text": ev["text"]})
+                        elif ev["type"] in ("tool_start", "tool_end"):
+                            yield _sse(ev)
+                        elif ev["type"] == "final":
+                            citations = ev["citations"]
+                            tool_events = ev["toolEvents"]
+                            if not buffer and ev["content"]:
+                                # 个别模型不走增量:最终文本一次性补发
+                                buffer.append(ev["content"])
+                                yield _sse({"type": "delta", "text": ev["content"]})
+                except Exception as e:  # noqa: BLE001 agent 失败降级为纯 RAG 回答
+                    logger.warning("agent stream failed, fallback to rag: %s", e)
+                    async for chunk in _rag_fallback_stream(db2, c2, history, message, buffer):
+                        yield chunk
+                    return
+                from app.services.agent import strip_fake_tool_calls
+
+                full = strip_fake_tool_calls("".join(buffer))
+                saved = WorkMessage(client_id=client_id, role="assistant", content=full)
+                saved.citations_json = json.dumps(citations, ensure_ascii=False)
+                saved.tool_events_json = json.dumps(tool_events, ensure_ascii=False)
+                db2.add(saved)
+                db2.commit()
+                yield _sse({
+                    "type": "done",
+                    "content": full,
+                    "citations": citations,
+                    "toolEvents": tool_events,
+                    "messageId": saved.id,
+                })
+
+            elif mode == "rag":
+                async for chunk in _rag_fallback_stream(db2, c2, history, message, []):
+                    yield chunk
+
+            else:
+                # mock 模式:检索仍真实,回答分片模拟流式
+                try:
+                    citations = await kb.search_async(db2, message, client_id=client_id, top_k=4)
+                except Exception:  # noqa: BLE001
+                    citations = []
+                reply = MOCK_REPLIES[len(message) % len(MOCK_REPLIES)].format(client=client_name)
+                if citations:
+                    reply += f" 我在知识库里找到了 {len(citations)} 条相关资料,已在回答下方列出。"
+                step = 12
+                for i in range(0, len(reply), step):
+                    yield _sse({"type": "delta", "text": reply[i : i + step]})
+                saved = WorkMessage(client_id=client_id, role="assistant", content=reply)
+                saved.citations_json = json.dumps(citations, ensure_ascii=False)
+                db2.add(saved)
+                db2.commit()
+                yield _sse({"type": "done", "citations": citations, "messageId": saved.id})
+        finally:
+            db2.close()
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+async def _rag_fallback_stream(
+    db: OrmSession, c: Client, history: list[dict], message: str, already: list[str]
+):
+    """agent 不可用/失败时的纯 RAG 流式回答。
+
+    already 非空说明 agent 已流出部分文本:直接以已有内容收尾,避免前端拼接混乱。
+    """
+    if already:
+        full = "".join(already).strip()
+        saved = WorkMessage(client_id=c.id, role="assistant", content=full)
+        db.add(saved)
+        db.commit()
+        yield _sse({"type": "done", "citations": [], "messageId": saved.id})
+        return
+
     try:
         citations = await kb.search_async(db, message, client_id=c.id, top_k=4)
     except Exception as e:  # noqa: BLE001 检索失败不阻塞对话
         logger.warning("kb search failed: %s", e)
         citations = []
 
-    db.add(WorkMessage(client_id=c.id, role="user", content=message))
+    from app.services.llm import _call_qianfan_stream
+
+    messages = [{"role": "system", "content": _chat_system(c, citations)}]
+    for m in history[-8:]:
+        messages.append({"role": "user" if m["role"] == "user" else "assistant", "content": m["content"]})
+    if messages[-1]["role"] == "assistant":
+        messages.append({"role": "user", "content": message})
+
+    buffer: list[str] = []
+    try:
+        async for typ, payload in _call_qianfan_stream(messages, settings.model_fast):
+            if typ != "delta":
+                continue
+            buffer.append(payload)
+            yield _sse({"type": "delta", "text": payload})
+    except Exception as e:  # noqa: BLE001
+        logger.warning("chat stream failed: %s", e)
+        yield _sse({"type": "error", "message": str(e)[:200]})
+    full = "".join(buffer).strip()
+    saved = WorkMessage(client_id=c.id, role="assistant", content=full)
+    saved.citations_json = json.dumps(citations, ensure_ascii=False)
+    db.add(saved)
     db.commit()
-
-    if settings.has_llm:
-        from app.services.llm import _call_qianfan_stream
-
-        history = (
-            db.query(WorkMessage)
-            .filter(WorkMessage.client_id == c.id)
-            .order_by(WorkMessage.created_at)
-            .all()
-        )
-        messages = [{"role": "system", "content": _chat_system(c, citations)}]
-        for m in history[-8:]:
-            messages.append({"role": "user" if m.role == "user" else "assistant", "content": m.content})
-        if messages[-1]["role"] == "assistant":
-            messages.append({"role": "user", "content": message})
-
-        async def gen():
-            buffer = []
-            try:
-                async for typ, payload in _call_qianfan_stream(messages, settings.model_fast):
-                    if typ != "delta":
-                        continue
-                    buffer.append(payload)
-                    yield f"data: {json.dumps({'type': 'delta', 'text': payload}, ensure_ascii=False)}\n\n"
-            except Exception as e:  # noqa: BLE001
-                logger.warning("chat stream failed: %s", e)
-                yield f"data: {json.dumps({'type': 'error', 'message': str(e)[:200]}, ensure_ascii=False)}\n\n"
-            full = "".join(buffer).strip()
-            saved = WorkMessage(client_id=c.id, role="assistant", content=full)
-            saved.citations_json = json.dumps(citations, ensure_ascii=False)
-            db.add(saved)
-            db.commit()
-            yield (
-                "data: "
-                + json.dumps(
-                    {"type": "done", "citations": citations, "messageId": saved.id},
-                    ensure_ascii=False,
-                )
-                + "\n\n"
-            )
-
-    else:
-        reply = MOCK_REPLIES[len(message) % len(MOCK_REPLIES)].format(client=c.name)
-        if citations:
-            reply += f" 我在知识库里找到了 {len(citations)} 条相关资料,已在回答下方列出。"
-
-        async def gen():
-            # mock 模式:分片模拟流式
-            step = 12
-            for i in range(0, len(reply), step):
-                yield f"data: {json.dumps({'type': 'delta', 'text': reply[i : i + step]}, ensure_ascii=False)}\n\n"
-            saved = WorkMessage(client_id=c.id, role="assistant", content=reply)
-            saved.citations_json = json.dumps(citations, ensure_ascii=False)
-            db.add(saved)
-            db.commit()
-            yield (
-                "data: "
-                + json.dumps({"type": "done", "citations": citations, "messageId": saved.id}, ensure_ascii=False)
-                + "\n\n"
-            )
-
-    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+    yield _sse({"type": "done", "citations": citations, "messageId": saved.id})
 
 
 # ---------- Tasks ----------

@@ -254,6 +254,8 @@ class WorkMessage(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     # 引用: [{"docId","docTitle","chunkId","quote","score"}]
     citations_json: Mapped[str] = mapped_column(Text, default="[]")
+    # agent 工具过程: [{"name","label","summary"}]
+    tool_events_json: Mapped[str] = mapped_column(Text, default="[]")
     task_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
 
