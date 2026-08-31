@@ -33,6 +33,7 @@ export default function Workbench() {
   const [running, setRunning] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const client = clients.find((c) => c.id === activeId) || null;
@@ -341,8 +342,9 @@ export default function Workbench() {
             onQuickCommand={handleQuickCommand}
             onApprovePlan={handleApprovePlan}
             onConfirmApproval={handleConfirmApproval}
+            onToggleRight={() => setRightOpen((v) => !v)}
           />
-          <ArtifactPane artifacts={artifacts} running={running} />
+          <ArtifactPane artifacts={artifacts} running={running} open={rightOpen} />
         </>
       ) : (
         <div className="wb-empty" style={{ flex: 1, alignSelf: "center" }}>左侧选择或新建一个客户开始。</div>

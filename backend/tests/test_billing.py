@@ -77,7 +77,11 @@ def test_plan_expiry_clears_plan_pool(test_db):
     assert credits.has_credits(test_db, u)  # pack 池仍可用
 
 
-def test_register_grants_signup_bonus_and_demo_checkout(api_client, test_db):
+def test_register_grants_signup_bonus_and_demo_checkout(api_client, test_db, monkeypatch):
+    # 与本机 .env 解耦:强制走演示通道
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "stripe_api_key", "")
     r = api_client.post("/api/auth/register", json={"username": "tester01", "password": "password8"})
     assert r.status_code == 200
     token = r.json()["token"]

@@ -106,7 +106,7 @@ export default function ClientPane({
                 {c.policies.length > 0 && (
                   <span className="wb-client-count">托管 {c.policies.length} 单</span>
                 )}
-                {c.engagements.map((e) => {
+                {c.engagements.slice(0, 2).map((e) => {
                   const tone = engagementTone(e);
                   return (
                     <span key={e.id} className={"wb-tag " + tone.cls} title={e.title + (e.note ? ` — ${e.note}` : "")}>
@@ -116,6 +116,14 @@ export default function ClientPane({
                     </span>
                   );
                 })}
+                {c.engagements.length > 2 && (
+                  <span
+                    className="wb-tag"
+                    title={c.engagements.slice(2).map((e) => `${e.kindLabel} ${e.title}`).join("\n")}
+                  >
+                    +{c.engagements.length - 2}
+                  </span>
+                )}
               </div>
               {open &&
                 c.members.map((m) => (

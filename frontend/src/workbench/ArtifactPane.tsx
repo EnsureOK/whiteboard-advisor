@@ -7,6 +7,8 @@ import { Markdown } from "./markdown";
 interface Props {
   artifacts: ArtifactOut[];
   running: boolean;
+  /** 窄视口抽屉态是否展开 */
+  open?: boolean;
 }
 
 const TYPE_ICON: Record<string, IconName> = {
@@ -33,12 +35,12 @@ const TYPE_EXPORTS: Record<string, { fmt: string; label: string }[]> = {
 };
 
 /** 右栏:工作区(工件列表 + 保单检视矩阵视图 + 导出) */
-export default function ArtifactPane({ artifacts, running }: Props) {
+export default function ArtifactPane({ artifacts, running, open }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const active = artifacts.find((a) => a.id === activeId) || artifacts[0] || null;
 
   return (
-    <aside className="wb-right">
+    <aside className={"wb-right" + (open ? " open" : "")}>
       <div className="wb-right-head">
         工作区
         <span className="wb-right-status">

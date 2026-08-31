@@ -964,6 +964,19 @@
 
 /* ---------- 响应式:窄视口保中栏 ---------- */
 
+.wb-right-toggle {
+  display: none;
+  border: 1px solid var(--w-line);
+  background: var(--w-surface);
+  color: var(--w-muted);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  align-items: center;
+  justify-content: center;
+}
+.wb-right-toggle:hover { color: var(--w-ink); border-color: var(--w-faint); }
+
 @media (max-width: 1180px) {
   .wb-side { width: 232px; }
   .wb-right { width: 300px; }
@@ -971,6 +984,19 @@
 }
 @media (max-width: 980px) {
   .wb-right { display: none; }
+  /* 抽屉态:overlay 展开工作区 */
+  .wb-right.open {
+    display: flex;
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: min(384px, 92vw);
+    z-index: 60;
+    box-shadow: -8px 0 32px rgba(15, 15, 12, 0.16);
+    border-left: 1px solid var(--w-line);
+  }
+  .wb-right-toggle { display: flex; }
 }
 @media (max-width: 760px) {
   .wb-side { display: none; }

@@ -15,6 +15,7 @@ interface Props {
   onQuickCommand: (label: string) => void;
   onApprovePlan: () => void;
   onConfirmApproval: (eventId: string) => void;
+  onToggleRight?: () => void;
 }
 
 const QUICK_COMMANDS = ["检视保单", "生成方案", "准备面谈", "写跟进"];
@@ -30,7 +31,7 @@ const TYPE_LABEL: Record<string, string> = { personal: "个人", family: "家庭
 
 export default function ChatPane({
   client, messages, task, running, streaming, llmAvailable,
-  onSend, onQuickCommand, onApprovePlan, onConfirmApproval,
+  onSend, onQuickCommand, onApprovePlan, onConfirmApproval, onToggleRight,
 }: Props) {
   const [text, setText] = useState("");
   const [expandedCite, setExpandedCite] = useState<string | null>(null);
@@ -59,6 +60,63 @@ export default function ChatPane({
     : 0;
   const openEngagements = client.engagements;
 
+  // 任务卡按创建时间插入消息流(修"新消息插到任务卡上方"的时序错乱)
+  const lastMsgId = messages[messages.length - 1]?.id;
+  const taskPos = task
+    ? messages.filter((m) => m.createdAt <= task.createdAt).length
+    : messages.length;
+  const beforeTask = messages.slice(0, taskPos);
+  const afterTask = messages.slice(taskPos);
+
+  const renderMsg = (m: MessageOut) => (
+    <div key={m.id} className={"wb-msg " + m.role}>
+      {m.role === "assistant" && (m.toolEvents?.length || 0) > 0 && (
+        <div className="wb-tools">
+          {m.toolEvents!.map((t, i) => (
+            <div key={i} className="wb-tool-row">
+              {t.running ? (
+                <Spinner size={11} />
+              ) : (
+                <span className="wb-tool-check"><Icon name="check" size={11} strokeWidth={2.6} /></span>
+              )}
+              <span className={"wb-tool-name" + (t.running ? " running" : "")}>{t.label}</span>
+              {t.summary && <span className="wb-tool-sum">{t.summary}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {m.role === "assistant" ? (
+        <div className={"wb-bubble" + (streaming && m.id === lastMsgId ? " streaming" : "")}>
+          <Markdown text={m.content} />
+        </div>
+      ) : (
+        <div className="wb-bubble">{m.content}</div>
+      )}
+      {m.role === "assistant" && m.citations.length > 0 && (
+        <div className="wb-cites">
+          {m.citations.map((c, i) => (
+            <React.Fragment key={c.chunkId}>
+              <button
+                className={"wb-cite" + (expandedCite === c.chunkId ? " open" : "")}
+                title={`${c.docTitle} · 相关度 ${c.score.toFixed(2)}`}
+                onClick={() => setExpandedCite(expandedCite === c.chunkId ? null : c.chunkId)}
+              >
+                [{i + 1}] {c.docTitle}
+              </button>
+              {expandedCite === c.chunkId && (
+                <div className="wb-cite-pop">
+                  {c.text}
+                  {"\n"}
+                  <span className="src">《{c.docTitle}》 · score {c.score.toFixed(2)}</span>
+                </div>
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <main className="wb-main">
       {/* 客户上下文条 */}
@@ -73,6 +131,11 @@ export default function ChatPane({
               <i />{e.kindLabel}
             </span>
           ))}
+          {onToggleRight && (
+            <button className="wb-right-toggle" title="工作区" onClick={onToggleRight}>
+              <Icon name="table" size={15} />
+            </button>
+          )}
         </span>
       </div>
 
@@ -98,61 +161,9 @@ export default function ChatPane({
             </div>
           )}
 
-          {messages.map((m, idx) => (
-            <div key={m.id} className={"wb-msg " + m.role}>
-              {m.role === "assistant" && (m.toolEvents?.length || 0) > 0 && (
-                <div className="wb-tools">
-                  {m.toolEvents!.map((t, i) => (
-                    <div key={i} className="wb-tool-row">
-                      {t.running ? (
-                        <Spinner size={11} />
-                      ) : (
-                        <span className="wb-tool-check"><Icon name="check" size={11} strokeWidth={2.6} /></span>
-                      )}
-                      <span className={"wb-tool-name" + (t.running ? " running" : "")}>{t.label}</span>
-                      {t.summary && <span className="wb-tool-sum">{t.summary}</span>}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {m.role === "assistant" ? (
-                <div
-                  className={
-                    "wb-bubble" +
-                    (streaming && idx === messages.length - 1 ? " streaming" : "")
-                  }
-                >
-                  <Markdown text={m.content} />
-                </div>
-              ) : (
-                <div className="wb-bubble">{m.content}</div>
-              )}
-              {m.role === "assistant" && m.citations.length > 0 && (
-                <div className="wb-cites">
-                  {m.citations.map((c, i) => (
-                    <React.Fragment key={c.chunkId}>
-                      <button
-                        className={"wb-cite" + (expandedCite === c.chunkId ? " open" : "")}
-                        title={`${c.docTitle} · 相关度 ${c.score.toFixed(2)}`}
-                        onClick={() => setExpandedCite(expandedCite === c.chunkId ? null : c.chunkId)}
-                      >
-                        [{i + 1}] {c.docTitle}
-                      </button>
-                      {expandedCite === c.chunkId && (
-                        <div className="wb-cite-pop">
-                          {c.text}
-                          {"\n"}
-                          <span className="src">《{c.docTitle}》 · score {c.score.toFixed(2)}</span>
-                        </div>
-                      )}
-                    </React.Fragment>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+          {beforeTask.map(renderMsg)}
 
-          {/* 计划卡 / 执行时间线 */}
+          {/* 计划卡 / 执行时间线(按创建时间插在消息流中) */}
           {task && (
             <div className="wb-card">
               <div className="wb-card-head">
@@ -235,6 +246,8 @@ export default function ChatPane({
               )}
             </div>
           )}
+
+          {afterTask.map(renderMsg)}
         </div>
       </div>
 
