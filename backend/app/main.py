@@ -10,6 +10,7 @@ from app.api.billing import router as billing_router
 from app.api.broker_portal import router as broker_router
 from app.api.kb_admin import router as kb_router
 from app.api.session_ws import router as session_router
+from app.api.wecom_app import router as wecom_router
 from app.api.workbench import router as workbench_router
 from app.config import settings
 from app.db import init_db
@@ -47,6 +48,7 @@ app.include_router(workbench_router)
 app.include_router(kb_router)
 app.include_router(auth_router)
 app.include_router(billing_router)
+app.include_router(wecom_router)
 
 # 桌面版/生产:前端构建产物挂在 /app(存在才挂,开发模式仍走 Vite 5173)
 from app.paths import IS_FROZEN, resource_path

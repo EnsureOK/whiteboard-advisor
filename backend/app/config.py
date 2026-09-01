@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     # 企微群机器人 webhook(每日简报/通知推送;群里添加机器人即得地址)
     wecom_webhook_url: str = ""
 
+    # 企微自建应用(双向对话通道:@客户名 让助理干活)。全部配齐才激活
+    wecom_corp_id: str = ""
+    wecom_app_secret: str = ""
+    wecom_app_token: str = ""
+    wecom_app_aes_key: str = ""
+    wecom_app_agentid: str = ""
+
     # 短信验证码(手机号登录)。未配置时验证码写数据目录 sms-outbox.log(内测)
     sms_provider: str = ""  # "" | "aliyun"
     sms_aliyun_ak_id: str = ""
