@@ -794,7 +794,18 @@ async def _auto_run_task(task_id: str) -> None:
 
 
 async def _auto_run_task_inner(task_id: str) -> None:
+    """DAG 调度:每轮并行执行所有就绪节点;审批节点只阻塞它的下游分支,
+    无关分支继续跑;就绪集为空且有 waiting 时挂起等确认。"""
     from app.db import SessionLocal
+
+    async def _run_one(node: dict) -> None:
+        # 并行节点各开独立 session(SQLAlchemy session 非并发安全)
+        ndb = SessionLocal()
+        try:
+            ntask = ndb.get(Task, task_id)
+            await task_engine.execute_node(ndb, ntask, node)
+        finally:
+            ndb.close()
 
     db = SessionLocal()
     try:
@@ -804,26 +815,33 @@ async def _auto_run_task_inner(task_id: str) -> None:
         if task.status in ("planned", "approved"):
             task.status = "running"
             db.commit()
-        for _ in range(30):  # 步数上限,防御死循环
-            try:
-                event, awaiting = await task_engine.execute_step(db, task)
-            except ValueError:
-                break  # no pending step
-            except Exception as e:  # noqa: BLE001
-                logger.warning("auto run step failed: %s", e)
-                task.status = "failed"
-                db.commit()
-                return
-            if awaiting:
-                return  # 停在审批卡,等经纪人确认
+        plan = task_engine.normalize_plan(store.parse_plan(task.plan_json))
+        for _ in range(30):  # 轮次上限,防御死循环
             events = db.query(TaskEvent).filter(TaskEvent.task_id == task.id).all()
-            plan = store.parse_plan(task.plan_json)
-            if sum(1 for ev in events if ev.status in ("done", "confirmed")) >= len(plan):
+            states = task_engine.node_states(events)
+            if all(states.get(n["id"]) in ("done", "confirmed") for n in plan):
                 task.status = "done"
                 db.commit()
                 _notify_task_done(db, task)
                 return
-            await asyncio.sleep(0.65)  # 节奏感:时间线逐步点亮
+            ready = task_engine.ready_nodes(plan, states)
+            # 审批节点单独发起(不并行执行别的?——审批只是登记 waiting 事件,与旁支并行无冲突)
+            if not ready:
+                if any(s == "waiting_confirm" for s in states.values()):
+                    return  # 等经纪人确认,confirm 端点会重新拉起
+                logger.warning("task %s stuck: no ready nodes", task_id)
+                task.status = "failed"
+                db.commit()
+                return
+            try:
+                await asyncio.gather(*[_run_one(n) for n in ready])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("auto run round failed: %s", e)
+                task.status = "failed"
+                db.commit()
+                return
+            db.expire_all()
+            await asyncio.sleep(0.5)  # 节奏感:时间线逐步点亮
     finally:
         db.close()
 

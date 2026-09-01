@@ -63,22 +63,25 @@ _PLANS: dict[str, list[dict]] = {
 }
 
 
-# 计划步骤可用的工具白名单(execute_step 能执行的)
-PLAN_TOOLS = {"policy_db", "kb_search", "approval", "gap_calc", "compose", "generic"}
+# 计划步骤可用的工具白名单(execute_node 能执行的)
+PLAN_TOOLS = {"policy_db", "kb_search", "web_search", "approval", "gap_calc", "compose", "generic"}
 
 _TOOL_GUIDE = (
     "policy_db=调取客户档案与托管保单; kb_search=检索知识库(可带 query); "
+    "web_search=联网搜索最新市场/产品信息(可带 query); "
     "approval=暂停等经纪人确认(涉敏感信息时用); gap_calc=计算保障缺口; "
     "compose=生成最终工件(报告/方案书/提纲,一般收尾); generic=其他自定义步骤"
 )
 
 
 def _sanitize_plan(raw: object) -> Optional[list[dict]]:
-    """校验/清洗 LLM 产出的计划:工具白名单、步数 2-8、标题必填。"""
+    """校验/清洗 LLM 产出的计划:工具白名单、步数 2-8、标题必填;
+    deps 只能引用更早出现的 id(强制拓扑序,天然无环)。"""
     if not isinstance(raw, list) or not (2 <= len(raw) <= 8):
         return None
     steps: list[dict] = []
-    for item in raw:
+    seen_ids: set[str] = set()
+    for i, item in enumerate(raw):
         if not isinstance(item, dict):
             return None
         title = str(item.get("title", "")).strip()[:80]
@@ -87,9 +90,17 @@ def _sanitize_plan(raw: object) -> Optional[list[dict]]:
         tool = str(item.get("tool", "generic")).strip()
         if tool not in PLAN_TOOLS:
             tool = "generic"
-        step = {"tool": tool, "title": title}
-        if tool == "kb_search" and item.get("query"):
+        step_id = str(item.get("id", "") or f"s{i + 1}").strip()[:12]
+        if step_id in seen_ids:
+            step_id = f"s{i + 1}"
+        step: dict = {"id": step_id, "tool": tool, "title": title}
+        if tool in ("kb_search", "web_search") and item.get("query"):
             step["query"] = str(item["query"])[:120]
+        deps_raw = item.get("deps")
+        if isinstance(deps_raw, list):
+            deps = [str(d) for d in deps_raw if str(d) in seen_ids]  # 只认已出现的 id
+            step["deps"] = deps[:4]
+        seen_ids.add(step_id)
         steps.append(step)
     return steps
 
@@ -128,12 +139,15 @@ async def build_plan(task_kind: str, client: Client, message: str) -> list[dict]
     """生成计划步骤:LLM 依据客户上下文定制;不可用时用模板。"""
     base = _PLANS.get(task_kind, _PLANS["followup"])
     prompt = (
-        "为保险经纪人的智能助理拟一份任务执行计划。\n"
+        "为保险经纪人的智能助理拟一份任务执行计划(DAG:可并行)。\n"
         f"{_plan_context(client, message)}\n"
         f"任务类型: {task_kind}。参考模板: {json.dumps(base, ensure_ascii=False)}\n"
         f"可用工具: {_TOOL_GUIDE}\n"
-        '只输出 JSON 数组,格式 [{"tool":"...","title":"中文步骤标题","query":"仅 kb_search 需要"}],'
-        "3-6 步,结合该客户的实际情况定制标题;涉及体检报告/收入等敏感信息须含一步 approval;最后一步用 compose。"
+        '只输出 JSON 数组,每步格式 {"id":"s1","tool":"...","title":"中文步骤标题",'
+        '"deps":["依赖的步骤id"],"query":"仅检索类需要"}。\n'
+        "规则: 3-6 步;deps 只能引用前面出现过的 id,无依赖填 [];"
+        "互不依赖的步骤(如 检索条款 与 测算缺口 与 联网查市场)给相同的 deps 使其并行;"
+        "涉及体检报告/收入等敏感信息须含一步 approval;最后一步用 compose 且 deps 汇聚所有前置分支。"
     )
     return (await _llm_plan(prompt)) or [dict(step) for step in base]
 
@@ -349,7 +363,7 @@ def _save_artifact(db: OrmSession, client: Client, task_id: str | None, type_: s
     return artifact
 
 
-async def _run_compose(db: OrmSession, task: Task, client: Client) -> tuple[Artifact, dict]:
+async def _run_compose(db: OrmSession, task: Task, client: Client, upstream_notes: str = "") -> tuple[Artifact, dict]:
     if task.kind == "policy_review":
         gap = _run_gap_calc(db, task, client)
         if gap["policyCount"] == 0:
@@ -368,7 +382,7 @@ async def _run_compose(db: OrmSession, task: Task, client: Client) -> tuple[Arti
         artifact = _save_artifact(db, client, task.id, "review_matrix", f"{client.name}·保单检视矩阵", content)
         return artifact, content
 
-    doc_type, title, content = await compose_doc(db, client, task.kind)
+    doc_type, title, content = await compose_doc(db, client, task.kind, upstream_notes=upstream_notes)
     artifact = _save_artifact(db, client, task.id, doc_type, title, content)
     return artifact, content
 
@@ -400,7 +414,7 @@ def _doc_facts(db: OrmSession, client: Client) -> str:
     return "\n".join(lines)
 
 
-async def _draft_sections_llm(db: OrmSession, client: Client, kind: str) -> Optional[dict]:
+async def _draft_sections_llm(db: OrmSession, client: Client, kind: str, upstream_notes: str = "") -> Optional[dict]:
     """千帆起草文档 JSON;不可用或解析失败返回 None。"""
     from app.config import settings
 
@@ -411,9 +425,10 @@ async def _draft_sections_llm(db: OrmSession, client: Client, kind: str) -> Opti
         from app.services.llm import _call_qianfan
 
         _, _, goal = _DOC_SPECS[kind]
+        notes_block = f"\n\n此前步骤的检索发现(可引用):\n{upstream_notes}" if upstream_notes else ""
         prompt = (
             f"{load_soul()}\n\n"
-            f"任务: {goal}。基于以下事实(不得编造数字):\n{_doc_facts(db, client)}\n\n"
+            f"任务: {goal}。基于以下事实(不得编造数字):\n{_doc_facts(db, client)}{notes_block}\n\n"
             '只输出 JSON,格式: {"summary": "一句话摘要", "sections": [{"heading": "小节标题", "body": "正文,要点用 - 开头分行"}]}\n'
             "3-5 个小节;方案书需含现状分析/缺口与建议/预算与节奏;面谈提纲需含目标/要点/提问清单;跟进消息只需 1-2 节,口吻可直接发给客户。"
         )
@@ -514,10 +529,10 @@ async def revise_doc(db: OrmSession, client: Client, old_content: dict, instruct
         return None
 
 
-async def compose_doc(db: OrmSession, client: Client, kind: str) -> tuple[str, str, dict]:
+async def compose_doc(db: OrmSession, client: Client, kind: str, upstream_notes: str = "") -> tuple[str, str, dict]:
     """产出文档类工件内容: (artifact_type, title, content)。"""
     doc_type, doc_name, _goal = _DOC_SPECS.get(kind, _DOC_SPECS["followup"])
-    draft = await _draft_sections_llm(db, client, kind) or _template_sections(db, client, kind)
+    draft = await _draft_sections_llm(db, client, kind, upstream_notes) or _template_sections(db, client, kind)
     content = {
         "kind": "doc",
         "docType": doc_type,
@@ -529,51 +544,94 @@ async def compose_doc(db: OrmSession, client: Client, kind: str) -> tuple[str, s
     return doc_type, f"{client.name}·{doc_name}", content
 
 
-async def execute_step(db: OrmSession, task: Task) -> tuple[TaskEvent, bool]:
-    """执行任务的下一个未完成步骤。
+# ---------- DAG 执行(计划步骤可声明 deps,并行分支/审批只阻塞下游) ----------
 
-    返回 (event, awaiting_confirmation)。
-    - 普通 step: running -> done
-    - approval step: 状态 waiting_confirm,确认后由 confirm_event 推进为 confirmed
-    - compose step: 额外生成/更新工件,event payload 带工件摘要
-    """
-    from app.services.workbench_store import parse_plan
+def normalize_plan(plan: list[dict]) -> list[dict]:
+    """归一化为 DAG 节点:补 id 与 deps。无 deps 字段的旧计划=线性链。"""
+    out: list[dict] = []
+    for i, step in enumerate(plan):
+        s = dict(step)
+        s.setdefault("id", f"s{i + 1}")
+        if "deps" not in s or not isinstance(s.get("deps"), list):
+            s["deps"] = [out[i - 1]["id"]] if i > 0 else []
+        out.append(s)
+    return out
 
+
+def node_states(events: list[TaskEvent]) -> dict[str, str]:
+    """nodeId -> 最新事件状态(done/confirmed/running/waiting_confirm/failed)。"""
+    states: dict[str, str] = {}
+    for e in sorted(events, key=lambda x: x.seq):
+        try:
+            nid = json.loads(e.payload_json or "{}").get("nodeId")
+        except json.JSONDecodeError:
+            nid = None
+        if nid:
+            states[nid] = e.status
+    return states
+
+
+def ready_nodes(plan: list[dict], states: dict[str, str]) -> list[dict]:
+    """依赖全部完成且自身未发起的节点(审批 waiting 只挡它的下游)。"""
+    return [
+        n
+        for n in plan
+        if n["id"] not in states
+        and all(states.get(d) in ("done", "confirmed") for d in n["deps"])
+    ]
+
+
+def _upstream_notes(plan: list[dict], node: dict, events: list[TaskEvent]) -> str:
+    """汇聚节点的上游产物:检索命中/联网结果等文本,注入 compose 起草。"""
+    by_node: dict[str, dict] = {}
+    for e in events:
+        try:
+            p = json.loads(e.payload_json or "{}")
+        except json.JSONDecodeError:
+            continue
+        if p.get("nodeId"):
+            by_node[p["nodeId"]] = p
+    notes: list[str] = []
+    for dep in node.get("deps", []):
+        p = by_node.get(dep) or {}
+        for h in (p.get("hits") or [])[:3]:
+            notes.append(f"[知识库]{h.get('docTitle', '')}: {h.get('text', '')[:180]}")
+        for w in (p.get("web") or [])[:3]:
+            notes.append(f"[联网]{w.get('title', '')}: {w.get('snippet', '')[:180]}")
+    return "\n".join(notes[:8])
+
+
+async def execute_node(db: OrmSession, task: Task, node: dict) -> tuple[TaskEvent, bool]:
+    """执行单个 DAG 节点。返回 (event, awaiting_confirmation)。"""
     client = db.get(Client, task.client_id)
-    plan = parse_plan(task.plan_json)
-
-    events = db.query(TaskEvent).filter(TaskEvent.task_id == task.id).all()
-    done_count = sum(1 for e in events if e.status in ("done", "confirmed"))
-
-    if done_count >= len(plan):
-        raise ValueError("no pending step")
-
-    # 若上一步是 approval 且未确认 -> 阻塞
-    last = max(events, key=lambda e: e.seq) if events else None
-    if last and last.type == "approval" and last.status == "waiting_confirm":
-        return last, True
-
-    step = plan[done_count]
-    tool = step.get("tool", "generic")
-    title = step.get("title", tool)
+    tool = node.get("tool", "generic")
+    title = node.get("title", tool)
+    node_id = node.get("id", "")
 
     if tool == "approval":
         event = add_event(
             db, task, type_="approval", title=title, status="waiting_confirm",
-            payload={"step": step, "hint": "涉及客户敏感信息(如体检报告),需经纪人确认授权后继续。"},
+            payload={"nodeId": node_id, "step": node, "hint": "涉及客户敏感信息(如体检报告),需经纪人确认授权后继续。"},
         )
         return event, True
 
-    event = add_event(db, task, type_="tool", title=title, status="running", payload={"tool": tool})
+    event = add_event(db, task, type_="tool", title=title, status="running", payload={"nodeId": node_id, "tool": tool})
 
+    events_now = db.query(TaskEvent).filter(TaskEvent.task_id == task.id).all()
     if tool == "policy_db":
         payload = _run_policy_db(db, task, client)
     elif tool == "kb_search":
-        payload = await _run_kb_search(db, task, client, step)
+        payload = await _run_kb_search(db, task, client, node)
+    elif tool == "web_search":
+        from app.services import websearch
+
+        results = await websearch.search(node.get("query") or title, count=5)
+        payload = {"web": results}
     elif tool == "gap_calc":
         payload = _run_gap_calc(db, task, client)
     elif tool == "compose":
-        artifact, content = await _run_compose(db, task, client)
+        notes = _upstream_notes(normalize_plan(json.loads(task.plan_json or "[]")), node, events_now)
+        artifact, content = await _run_compose(db, task, client, upstream_notes=notes)
         payload = {
             "artifact": {"id": artifact.id, "type": artifact.type, "title": artifact.title, "version": artifact.version},
             "summary": content.get("summary", ""),
@@ -581,11 +639,28 @@ async def execute_step(db: OrmSession, task: Task) -> tuple[TaskEvent, bool]:
     else:
         payload = {"tool": tool}
 
-    event.payload_json = json.dumps({"tool": tool, **payload}, ensure_ascii=False)
+    event.payload_json = json.dumps({"nodeId": node_id, "tool": tool, **payload}, ensure_ascii=False)
     event.status = "done"
     db.commit()
     db.refresh(event)
     return event, False
+
+
+async def execute_step(db: OrmSession, task: Task) -> tuple[TaskEvent, bool]:
+    """兼容入口:执行下一个就绪节点(线性计划下与旧行为一致)。"""
+    from app.services.workbench_store import parse_plan
+
+    plan = normalize_plan(parse_plan(task.plan_json))
+    events = db.query(TaskEvent).filter(TaskEvent.task_id == task.id).all()
+    states = node_states(events)
+
+    waiting = next((e for e in events if e.status == "waiting_confirm"), None)
+    ready = ready_nodes(plan, states)
+    if not ready:
+        if waiting:
+            return waiting, True
+        raise ValueError("no pending step")
+    return await execute_node(db, task, ready[0])
 
 
 def confirm_event(db: OrmSession, task: Task, event_id: str) -> TaskEvent:

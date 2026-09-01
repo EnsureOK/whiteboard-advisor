@@ -346,6 +346,63 @@ def test_task_batch_fanout(api_client, test_db):
     assert bad.status_code == 400
 
 
+def test_dag_parallel_branches_and_approval_gating(api_client, test_db):
+    """DAG 执行:菱形并行分支;审批只阻塞它的下游,旁支继续执行。"""
+    import json as _json
+
+    from app.db_models import Client, Member, Task
+    from app.services import task_engine
+
+    c = Client(name="DAG客户", client_type="personal")
+    test_db.add(c)
+    test_db.flush()
+    test_db.add(Member(client_id=c.id, name="王", relation="本人", seq=0))
+    test_db.commit()
+
+    # s1 -> (s2=approval, s3=gap_calc 并行) -> s4=compose(汇聚)
+    plan = [
+        {"id": "s1", "tool": "policy_db", "title": "调档案", "deps": []},
+        {"id": "s2", "tool": "approval", "title": "确认授权", "deps": ["s1"]},
+        {"id": "s3", "tool": "gap_calc", "title": "测缺口", "deps": ["s1"]},
+        {"id": "s4", "tool": "compose", "title": "生成报告", "deps": ["s2", "s3"]},
+    ]
+    task = Task(
+        client_id=c.id, title="DAG测试", kind="policy_review", status="running",
+        plan_json=_json.dumps(plan, ensure_ascii=False),
+    )
+    test_db.add(task)
+    test_db.commit()
+
+    # 1: s1
+    ev, awaiting = asyncio_run(task_engine.execute_step(test_db, task))
+    assert not awaiting and "调档案" in ev.title
+    # 2: 就绪 = s2(approval) 与 s3;先发起 s2 → waiting
+    ev, awaiting = asyncio_run(task_engine.execute_step(test_db, task))
+    assert awaiting and ev.status == "waiting_confirm"
+    # 3: 关键——s2 在等确认,但旁支 s3 仍然就绪并执行(审批只阻塞下游 s4)
+    ev, awaiting = asyncio_run(task_engine.execute_step(test_db, task))
+    assert not awaiting and "测缺口" in ev.title and ev.status == "done"
+    # 4: 只剩 s4,但依赖 s2 未确认 → 返回 waiting
+    ev, awaiting = asyncio_run(task_engine.execute_step(test_db, task))
+    assert awaiting and ev.status == "waiting_confirm"
+    # 确认 s2 后 s4 可执行,任务可完成
+    task_engine.confirm_event(test_db, task, ev.id)
+    ev, awaiting = asyncio_run(task_engine.execute_step(test_db, task))
+    assert not awaiting and "生成报告" in ev.title and ev.status == "done"
+
+    events = test_db.query(type(ev)).filter_by(task_id=task.id).all()
+    states = task_engine.node_states(events)
+    assert all(states[s] in ("done", "confirmed") for s in ("s1", "s2", "s3", "s4"))
+
+
+def test_normalize_plan_linear_compat():
+    from app.services.task_engine import normalize_plan
+
+    plan = normalize_plan([{"tool": "policy_db", "title": "a"}, {"tool": "compose", "title": "b"}])
+    assert plan[0]["id"] == "s1" and plan[0]["deps"] == []
+    assert plan[1]["deps"] == ["s1"]  # 旧线性计划 = 链
+
+
 def asyncio_run(coro):
     import asyncio
 

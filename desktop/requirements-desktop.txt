@@ -10,7 +10,7 @@ pyobjc-framework-Security==11.1; sys_platform == "darwin"
 
 # Linux 注: 需系统库(Ubuntu/Debian):
 #   sudo apt install libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-webkit2-4.1
-PyGObject>=3.42; sys_platform == "linux"
+PyGObject>=3.42,<3.51; sys_platform == "linux"  # 3.51+ 需 girepository-2.0(仅 ubuntu24.04+)
 
 # Windows 注: pywebview 自带条件依赖(WebView2;Win10/11 已内置 Edge WebView2 运行时)
 pywebview==6.2.1
