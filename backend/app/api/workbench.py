@@ -113,6 +113,14 @@ class TaskCreate(BaseModel):
     message: Optional[str] = None
 
 
+class TaskBatchCreate(BaseModel):
+    clientIds: list[str]
+    kind: str = "policy_review"
+    message: Optional[str] = None
+    # True: 创建后直接确认并服务端并行执行(批量场景默认;False 则逐个确认)
+    autoRun: bool = True
+
+
 class ApproveBody(BaseModel):
     plan: Optional[list[dict]] = None
     # 服务端自动执行(默认);False 时由调用方自行 step(测试用)
@@ -680,6 +688,62 @@ async def create_task(
     return store.task_out(task)
 
 
+@router.post("/tasks/batch")
+async def create_task_batch(
+    body: TaskBatchCreate,
+    db: OrmSession = Depends(get_db),
+    user: Optional[User] = Depends(auth_svc.get_optional_user),
+) -> dict:
+    """批量 fan-out:为多个客户各建同类任务并行执行(graph 编排第一步)。
+
+    计划生成并行(限流 3);autoRun 时创建即确认,由服务端并发执行
+    (受 _AUTO_RUN_SEM 排队),任务中心可看整组进度。
+    """
+    import uuid as _uuid
+
+    if not body.clientIds:
+        raise HTTPException(400, "至少选择一个客户")
+    if len(body.clientIds) > 20:
+        raise HTTPException(400, "单次批量最多 20 个客户")
+    if user:
+        from app.services import credits
+
+        if not credits.has_credits(db, user):
+            raise HTTPException(402, "积分不足:请续费套餐或购买积分包")
+
+    clients = [_get_client_or_404(db, cid) for cid in body.clientIds]
+    batch_id = _uuid.uuid4().hex
+
+    # 计划生成并行(每个客户一次 LLM 定制,限流防打爆千帆)
+    plan_sem = asyncio.Semaphore(3)
+
+    async def _plan_for(c: Client) -> list[dict]:
+        async with plan_sem:
+            return await task_engine.build_plan(body.kind, c, body.message or "")
+
+    plans = await asyncio.gather(*[_plan_for(c) for c in clients])
+
+    tasks: list[Task] = []
+    for c, plan in zip(clients, plans):
+        t = Task(
+            client_id=c.id,
+            title=f"{c.name}·{(body.message or body.kind)[:40]}",
+            kind=body.kind,
+            batch_id=batch_id,
+            status="approved" if body.autoRun else "planned",
+            created_by=user.id if user else None,
+            plan_json=json.dumps(plan, ensure_ascii=False),
+        )
+        db.add(t)
+        tasks.append(t)
+    db.commit()
+    for t in tasks:
+        db.refresh(t)
+        if body.autoRun:
+            asyncio.get_running_loop().create_task(_auto_run_task(t.id))
+    return {"batchId": batch_id, "tasks": [store.task_out(t) for t in tasks]}
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str, db: OrmSession = Depends(get_db)) -> dict:
     task = db.get(Task, kb.check_id(task_id, "task id"))
@@ -713,11 +777,23 @@ async def revise_task(task_id: str, body: ReviseBody, db: OrmSession = Depends(g
     return store.task_out(task)
 
 
+# 并发执行上限:防千帆限流与本机过载(批量 fan-out 时排队)
+_AUTO_RUN_SEM = asyncio.Semaphore(3)
+
+
 async def _auto_run_task(task_id: str) -> None:
     """服务端驱动的任务执行:循环 step 直到完成/等审批/失败。
 
     经纪人离开页面任务照跑;审批确认(confirm 端点)后再次拉起本协程续跑。
+    并发受 _AUTO_RUN_SEM 限制,批量任务自动排队。
     """
+    from app.db import SessionLocal
+
+    async with _AUTO_RUN_SEM:
+        await _auto_run_task_inner(task_id)
+
+
+async def _auto_run_task_inner(task_id: str) -> None:
     from app.db import SessionLocal
 
     db = SessionLocal()
@@ -840,6 +916,7 @@ async def list_tasks(
             {
                 "id": t.id,
                 "clientId": t.client_id,
+                "batchId": t.batch_id,
                 "clientName": client_names.get(t.client_id, ""),
                 "title": t.title,
                 "kind": t.kind,

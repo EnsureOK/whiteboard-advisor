@@ -180,6 +180,8 @@ class Task(Base):
     kind: Mapped[str] = mapped_column(String(32), default="generic", index=True)
     # planned -> approved -> running -> done / failed / cancelled
     status: Mapped[str] = mapped_column(String(20), default="planned", index=True)
+    # 批量任务组 id(跨客户 fan-out 的任务共享同一 batch)
+    batch_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     # 创建者(user id);未登录的旧数据为 null
     created_by: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
     # 计划卡内容(步骤列表,可被用户编辑后确认)

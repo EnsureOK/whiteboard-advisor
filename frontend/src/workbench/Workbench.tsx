@@ -373,6 +373,7 @@ export default function Workbench() {
         />
       ) : view === "tasks" ? (
         <TasksView
+          clients={clients}
           onToast={showToast}
           onOpenTask={async (clientId, taskId) => {
             setActiveId(clientId);

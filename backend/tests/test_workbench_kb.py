@@ -315,6 +315,37 @@ def test_doc_compose_and_office_export(api_client, test_db):
     assert resp.status_code == 200 and resp.content[:2] == b"PK"
 
 
+def test_task_batch_fanout(api_client, test_db):
+    """批量 fan-out:多客户并行建任务,共享 batch_id;autoRun=False 保持待确认。"""
+    from app.db_models import Client, Member
+
+    ids = []
+    for name in ("批量甲", "批量乙", "批量丙"):
+        c = Client(name=name, client_type="personal")
+        test_db.add(c)
+        test_db.flush()
+        test_db.add(Member(client_id=c.id, name=name[-1], relation="本人", seq=0))
+        ids.append(c.id)
+    test_db.commit()
+
+    r = api_client.post(
+        "/api/workbench/tasks/batch",
+        json={"clientIds": ids, "kind": "policy_review", "autoRun": False},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["tasks"]) == 3
+    assert all(t["batchId"] == data["batchId"] for t in data["tasks"])
+    assert all(t["status"] == "planned" and len(t["plan"]) == 5 for t in data["tasks"])
+
+    rows = api_client.get("/api/workbench/tasks").json()
+    batch_rows = [x for x in rows if x["batchId"] == data["batchId"]]
+    assert len(batch_rows) == 3
+
+    bad = api_client.post("/api/workbench/tasks/batch", json={"clientIds": [], "kind": "followup"})
+    assert bad.status_code == 400
+
+
 def asyncio_run(coro):
     import asyncio
 

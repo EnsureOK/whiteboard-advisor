@@ -120,6 +120,7 @@ def task_out(t: Task) -> dict:
     return {
         "id": t.id,
         "clientId": t.client_id,
+        "batchId": t.batch_id,
         "title": t.title,
         "kind": t.kind,
         "status": t.status,

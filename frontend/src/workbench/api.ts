@@ -298,11 +298,18 @@ export const api = {
 
   getTask: (id: string) => req<TaskOut>(`/api/workbench/tasks/${id}`),
 
+  createTaskBatch: (clientIds: string[], kind: string, message?: string, autoRun = true) =>
+    req<{ batchId: string; tasks: TaskOut[] }>("/api/workbench/tasks/batch", {
+      method: "POST",
+      body: JSON.stringify({ clientIds, kind, message, autoRun }),
+    }),
+
   listTasks: (clientId?: string) =>
     req<
       {
         id: string;
         clientId: string;
+        batchId: string | null;
         clientName: string;
         title: string;
         kind: string;
