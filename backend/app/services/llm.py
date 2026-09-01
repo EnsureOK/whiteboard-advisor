@@ -10,8 +10,10 @@ import hashlib
 import json
 import logging
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from enum import Enum
-from typing import Optional
+from typing import Iterator, Optional
 
 import httpx
 
@@ -21,6 +23,34 @@ from app.services import cost, rag
 from app.templates import registry
 
 logger = logging.getLogger("whiteboard-advisor.llm")
+
+# ---- 计量收集器(积分扣减用) ----
+# 入口用 `with collect_usage() as sink:` 包住业务调用,期间本协程及其派生子协程
+# (asyncio 子任务继承 context,DAG 并行 gather 亦然)的千帆 usage 都落入同一 sink;
+# 结束后 sum(sink) 即本次操作的 token 总量。未包裹时静默不记,零侵入。
+_usage_sink: ContextVar[Optional[list]] = ContextVar("wb_usage_sink", default=None)
+
+
+@contextmanager
+def collect_usage() -> Iterator[list]:
+    sink: list[int] = []
+    token = _usage_sink.set(sink)
+    try:
+        yield sink
+    finally:
+        _usage_sink.reset(token)
+
+
+def record_usage(usage: dict) -> None:
+    """把一次 LLM/embedding 调用的 usage 记入当前收集器(若有)。"""
+    sink = _usage_sink.get()
+    if sink is None or not usage:
+        return
+    total = int(usage.get("total_tokens") or 0)
+    if total <= 0:
+        total = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+    if total > 0:
+        sink.append(total)
 
 
 class TaskKind(str, Enum):
@@ -198,7 +228,9 @@ async def _call_qianfan(messages: list[dict], model: str) -> tuple[str, dict]:
         resp = await client.post(url, headers=headers, json=payload)
         resp.raise_for_status()
         data = resp.json()
-    return data["choices"][0]["message"]["content"], data.get("usage", {})
+    usage = data.get("usage", {})
+    record_usage(usage)
+    return data["choices"][0]["message"]["content"], usage
 
 
 def _parse_turn(raw: str) -> TurnPlan:
@@ -306,6 +338,7 @@ async def _call_qianfan_stream(messages: list[dict], model: str):
                     if delta:
                         yield ("delta", delta)
                 if obj.get("usage"):
+                    record_usage(obj["usage"])
                     yield ("usage", obj["usage"])
 
 

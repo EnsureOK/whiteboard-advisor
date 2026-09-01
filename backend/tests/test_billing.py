@@ -175,3 +175,90 @@ def test_chat_blocked_when_no_credits(api_client, test_db):
     # 未登录演示模式不拦截
     r = api_client.post("/api/workbench/chat", json={"clientId": c.id, "message": "hi"})
     assert r.status_code == 200
+
+
+# ---------- 计量收集器(任务/计划/文档修订的 LLM 用量) ----------
+
+def test_collect_usage_sink_mechanics():
+    import asyncio
+
+    from app.services.llm import collect_usage, record_usage
+
+    # 未包裹:静默不记不炸
+    record_usage({"total_tokens": 100})
+
+    async def _one(n: int) -> None:
+        record_usage({"total_tokens": n})
+
+    async def _scenario() -> tuple:
+        with collect_usage() as outer:
+            record_usage({"total_tokens": 10})
+            # 并行子协程继承 context,落入同一收集器(DAG gather 场景)
+            await asyncio.gather(_one(20), _one(30))
+            with collect_usage() as inner:  # 嵌套:内层独立,不串账
+                record_usage({"prompt_tokens": 4, "completion_tokens": 6})
+            record_usage({})  # 空 usage 忽略
+            return sum(outer), sum(inner)
+
+    # 不用 asyncio.run:它退出时把主线程默认 loop 置空,
+    # 会弄炸后续按 get_event_loop 风格写的用例
+    loop = asyncio.new_event_loop()
+    try:
+        outer_total, inner_total = loop.run_until_complete(_scenario())
+    finally:
+        loop.close()
+    assert outer_total == 60
+    assert inner_total == 10
+
+
+def test_usage_consume_hookup(test_db):
+    """collect_usage + _consume_usage 组合:任务执行挂点的直接验证。"""
+    from app.api.workbench import _consume_usage
+    from app.db_models import CreditLedger
+    from app.services.llm import collect_usage, record_usage
+
+    u = _user(test_db)
+    credits.grant(test_db, u, 10_000, source="pack_grant")
+
+    with collect_usage() as sink:
+        record_usage({"total_tokens": 3_000})
+        record_usage({"total_tokens": 1_500})
+    _consume_usage(test_db, u.id, sum(sink), "task:t1")
+
+    test_db.refresh(u)
+    assert u.credit_tokens_pack == 10_000 - 4_500
+    row = (
+        test_db.query(CreditLedger)
+        .filter(CreditLedger.user_id == u.id, CreditLedger.source == "consume")
+        .first()
+    )
+    assert row is not None
+    assert row.ref == "task:t1"
+    assert row.delta_tokens == -4_500
+
+
+def test_task_create_no_llm_no_ledger(api_client, test_db):
+    """无 LLM 时建任务走模板计划,不应产生任何扣费流水(挂点不误扣)。"""
+    from app.db_models import Client, CreditLedger
+
+    r = api_client.post("/api/auth/register", json={"username": "meter01", "password": "password8"})
+    token = r.json()["token"]
+    u = test_db.query(User).filter(User.username == "meter01").first()
+    credits.grant(test_db, u, 10_000, source="pack_grant")  # 过余额拦截
+    c = Client(name="计量测试", client_type="personal")
+    test_db.add(c)
+    test_db.commit()
+
+    r = api_client.post(
+        "/api/workbench/tasks",
+        json={"clientId": c.id, "kind": "policy_review"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert r.status_code == 200
+    u = test_db.query(User).filter(User.username == "meter01").first()
+    rows = (
+        test_db.query(CreditLedger)
+        .filter(CreditLedger.user_id == u.id, CreditLedger.source == "consume")
+        .all()
+    )
+    assert rows == []

@@ -45,6 +45,9 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
+        from app.services.llm import record_usage
+
+        record_usage(data.get("usage") or {})
         batch_vecs = [item["embedding"] for item in data["data"]]
         if len(batch_vecs) != len(batch):
             raise ValueError(f"embedding 返回数量不符: {len(batch_vecs)} != {len(batch)}")

@@ -35,6 +35,7 @@ from app.db_models import (
 from app.services import auth as auth_svc
 from app.services import kb, task_engine
 from app.services import workbench_store as store
+from app.services.llm import collect_usage
 
 logger = logging.getLogger("whiteboard-advisor.workbench")
 
@@ -529,24 +530,27 @@ async def chat(
                 tool_events: list = []
                 buffer: list[str] = []
                 usage_tokens = 0
+                # 工具内部的 LLM/embedding 量(SDK usage 之外:起草计划、查询向量化)
+                tool_sink: list[int] = []
                 try:
-                    async for ev in run_agent_stream(
-                        db2, c2, history, message, user_id=user_id, focus_member_id=focus_member_id
-                    ):
-                        if ev["type"] == "delta":
-                            buffer.append(ev["text"])
-                            yield _sse({"type": "delta", "text": ev["text"]})
-                        elif ev["type"] in ("tool_start", "tool_end", "task_created"):
-                            yield _sse(ev)
-                        elif ev["type"] == "final":
-                            citations = ev["citations"]
-                            tool_events = ev["toolEvents"]
-                            usage_tokens = ev.get("usageTokens", 0)
-                            if not buffer and ev["content"]:
-                                # 个别模型不走增量:最终文本一次性补发
-                                buffer.append(ev["content"])
-                                yield _sse({"type": "delta", "text": ev["content"]})
-                except Exception as e:  # noqa: BLE001 agent 失败降级为纯 RAG 回答
+                    with collect_usage() as tool_sink:
+                        async for ev in run_agent_stream(
+                            db2, c2, history, message, user_id=user_id, focus_member_id=focus_member_id
+                        ):
+                            if ev["type"] == "delta":
+                                buffer.append(ev["text"])
+                                yield _sse({"type": "delta", "text": ev["text"]})
+                            elif ev["type"] in ("tool_start", "tool_end", "task_created"):
+                                yield _sse(ev)
+                            elif ev["type"] == "final":
+                                citations = ev["citations"]
+                                tool_events = ev["toolEvents"]
+                                usage_tokens = ev.get("usageTokens", 0)
+                                if not buffer and ev["content"]:
+                                    # 个别模型不走增量:最终文本一次性补发
+                                    buffer.append(ev["content"])
+                                    yield _sse({"type": "delta", "text": ev["content"]})
+                except Exception as e:  # noqa: BLE001 agent 失败降级为纯 RAG 回答(量在 rag 内自行扣,不并入 sink 防双计)
                     logger.warning("agent stream failed, fallback to rag: %s", e)
                     async for chunk in _rag_fallback_stream(db2, c2, history, message, buffer, user_id):
                         yield chunk
@@ -559,7 +563,7 @@ async def chat(
                 saved.tool_events_json = json.dumps(tool_events, ensure_ascii=False)
                 db2.add(saved)
                 db2.commit()
-                _consume_usage(db2, user_id, usage_tokens, "chat:agent")
+                _consume_usage(db2, user_id, usage_tokens + sum(tool_sink), "chat:agent")
                 yield _sse({
                     "type": "done",
                     "content": full,
@@ -678,7 +682,9 @@ async def create_task(
 
         if not credits.has_credits(db, user):
             raise HTTPException(402, "积分不足:请续费套餐或购买积分包")
-    plan = await task_engine.build_plan(body.kind, c, body.message or "")
+    with collect_usage() as sink:
+        plan = await task_engine.build_plan(body.kind, c, body.message or "")
+    _consume_usage(db, user.id if user else None, sum(sink), "task:plan")
     title = body.title or f"{c.name}·{(body.message or body.kind)[:40]}"
     task = Task(
         client_id=c.id,
@@ -726,7 +732,9 @@ async def create_task_batch(
         async with plan_sem:
             return await task_engine.build_plan(body.kind, c, body.message or "")
 
-    plans = await asyncio.gather(*[_plan_for(c) for c in clients])
+    with collect_usage() as sink:
+        plans = await asyncio.gather(*[_plan_for(c) for c in clients])
+    _consume_usage(db, user.id if user else None, sum(sink), "task:plan-batch")
 
     tasks: list[Task] = []
     for c, plan in zip(clients, plans):
@@ -762,7 +770,12 @@ class ReviseBody(BaseModel):
 
 
 @router.post("/tasks/{task_id}/revise")
-async def revise_task(task_id: str, body: ReviseBody, db: OrmSession = Depends(get_db)) -> dict:
+async def revise_task(
+    task_id: str,
+    body: ReviseBody,
+    db: OrmSession = Depends(get_db),
+    user: Optional[User] = Depends(auth_svc.get_optional_user),
+) -> dict:
     """让 AI 按经纪人的意见调整计划(仅待确认状态)。"""
     task = db.get(Task, kb.check_id(task_id, "task id"))
     if not task:
@@ -773,7 +786,9 @@ async def revise_task(task_id: str, body: ReviseBody, db: OrmSession = Depends(g
     if not instruction:
         raise HTTPException(400, "请描述要怎么改")
     c = _get_client_or_404(db, task.client_id)
-    new_plan = await task_engine.revise_plan(c, store.parse_plan(task.plan_json), instruction)
+    with collect_usage() as sink:
+        new_plan = await task_engine.revise_plan(c, store.parse_plan(task.plan_json), instruction)
+    _consume_usage(db, user.id if user else None, sum(sink), "task:revise-plan")
     if new_plan is None:
         raise HTTPException(503, "AI 计划调整暂不可用(未配置模型),可直接手动编辑步骤")
     task.plan_json = json.dumps(new_plan, ensure_ascii=False)
@@ -802,7 +817,20 @@ async def _auto_run_task(task_id: str) -> None:
     并发受信号量限制(3),批量任务自动排队。
     """
     async with _get_auto_run_sem():
-        await _auto_run_task_inner(task_id)
+        with collect_usage() as sink:
+            try:
+                await _auto_run_task_inner(task_id)
+            finally:
+                # 执行期 LLM 用量记到任务创建者头上;审批分段续跑时各段各扣
+                if sum(sink):
+                    from app.db import SessionLocal
+
+                    sdb = SessionLocal()
+                    try:
+                        t = sdb.get(Task, task_id)
+                        _consume_usage(sdb, t.created_by if t else None, sum(sink), f"task:{task_id}")
+                    finally:
+                        sdb.close()
 
 
 async def _auto_run_task_inner(task_id: str) -> None:
@@ -887,7 +915,11 @@ async def approve_task(task_id: str, body: ApproveBody, db: OrmSession = Depends
 
 
 @router.post("/tasks/{task_id}/step")
-async def step_task(task_id: str, db: OrmSession = Depends(get_db)) -> dict:
+async def step_task(
+    task_id: str,
+    db: OrmSession = Depends(get_db),
+    user: Optional[User] = Depends(auth_svc.get_optional_user),
+) -> dict:
     task = db.get(Task, kb.check_id(task_id, "task id"))
     if not task:
         raise HTTPException(404, "task not found")
@@ -895,9 +927,11 @@ async def step_task(task_id: str, db: OrmSession = Depends(get_db)) -> dict:
         task.status = "running"
         db.commit()
     try:
-        event, awaiting = await task_engine.execute_step(db, task)
+        with collect_usage() as sink:
+            event, awaiting = await task_engine.execute_step(db, task)
     except ValueError as e:
         raise HTTPException(409, str(e))
+    _consume_usage(db, user.id if user else None, sum(sink), f"task:{task_id}")
     if not awaiting and event.status == "done":
         events = db.query(TaskEvent).filter(TaskEvent.task_id == task.id).all()
         plan = store.parse_plan(task.plan_json)
@@ -990,7 +1024,12 @@ async def export_artifact(artifact_id: str, fmt: str, db: OrmSession = Depends(g
 
 
 @router.post("/artifacts/{artifact_id}/revise")
-async def revise_artifact(artifact_id: str, body: ReviseBody, db: OrmSession = Depends(get_db)) -> dict:
+async def revise_artifact(
+    artifact_id: str,
+    body: ReviseBody,
+    db: OrmSession = Depends(get_db),
+    user: Optional[User] = Depends(auth_svc.get_optional_user),
+) -> dict:
     """按修改意见迭代文档类工件,产出新版本(v+1)。"""
     a = db.get(Artifact, kb.check_id(artifact_id, "artifact id"))
     if not a:
@@ -1002,7 +1041,9 @@ async def revise_artifact(artifact_id: str, body: ReviseBody, db: OrmSession = D
     if not instruction:
         raise HTTPException(400, "请描述要怎么改")
     c = _get_client_or_404(db, a.client_id)
-    draft = await task_engine.revise_doc(db, c, content, instruction)
+    with collect_usage() as sink:
+        draft = await task_engine.revise_doc(db, c, content, instruction)
+    _consume_usage(db, user.id if user else None, sum(sink), "artifact:revise")
     if draft is None:
         raise HTTPException(503, "AI 修改暂不可用(未配置模型)")
     new_content = {
