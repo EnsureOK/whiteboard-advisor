@@ -17,7 +17,9 @@ from app.services import zone_engine
 
 logger = logging.getLogger("whiteboard-advisor.store")
 
-_BASE = Path(__file__).resolve().parents[2] / "data"
+from app.paths import DATA_DIR as _WB_DATA_DIR
+
+_BASE = Path(_WB_DATA_DIR)
 _DATA_DIR = _BASE / "sessions"
 _SHARE_DIR = _BASE / "shares"
 _DATA_DIR.mkdir(parents=True, exist_ok=True)

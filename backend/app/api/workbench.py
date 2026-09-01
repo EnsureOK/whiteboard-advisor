@@ -40,9 +40,9 @@ logger = logging.getLogger("whiteboard-advisor.workbench")
 
 router = APIRouter(prefix="/api/workbench")
 
-CLIENT_FILE_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "client_files"
-)
+from app.paths import data_path
+
+CLIENT_FILE_DIR = data_path("client_files")
 os.makedirs(CLIENT_FILE_DIR, exist_ok=True)
 
 MAX_FILE_BYTES = 20 * 1024 * 1024  # 20MB / 个

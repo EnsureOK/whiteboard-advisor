@@ -9,4 +9,4 @@ if [ ! -d frontend/dist ] || [ -n "$(find frontend/src frontend/index.html -newe
   (cd frontend && npm run build)
 fi
 
-exec backend/.venv/bin/python desktop/app.py
+exec backend/.venv/bin/python desktop/launcher.py

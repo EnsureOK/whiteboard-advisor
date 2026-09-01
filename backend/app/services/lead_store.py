@@ -13,7 +13,9 @@ from app.services import broker, session_store
 
 logger = logging.getLogger("whiteboard-advisor.lead")
 
-_BASE = Path(__file__).resolve().parents[2] / "data"
+from app.paths import DATA_DIR as _WB_DATA_DIR
+
+_BASE = Path(_WB_DATA_DIR)
 _LEAD_DIR = _BASE / "leads"
 _LEAD_DIR.mkdir(parents=True, exist_ok=True)
 _CANCEL_PATH = _BASE / "cancel_counts.json"

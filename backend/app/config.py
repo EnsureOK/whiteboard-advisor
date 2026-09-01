@@ -1,10 +1,23 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.paths import DATA_DIR
+
+# 源码运行: backend/.env;打包运行/显式数据目录: 追加 DATA_DIR/.env(后者优先覆盖)
+_ENV_FILES = tuple(
+    p for p in (
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+        os.path.join(DATA_DIR, ".env"),
+    )
+    if os.path.isfile(p)
+) or ".env"
 
 
 class Settings(BaseSettings):
     """运行时配置。两套千帆/百度凭证分别覆盖 LLM 与语音服务。"""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_ENV_FILES, env_file_encoding="utf-8", extra="ignore")
 
     # 千帆大模型平台 (LLM, v2 OpenAI 兼容, Bearer 鉴权)
     qianfan_api_key: str = ""

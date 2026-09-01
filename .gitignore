@@ -22,3 +22,8 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+
+# 桌面版打包产物
+desktop/build/
+desktop/dist/
+desktop/bundled.env

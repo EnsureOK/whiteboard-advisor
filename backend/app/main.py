@@ -38,10 +38,16 @@ app.include_router(auth_router)
 app.include_router(billing_router)
 
 # 桌面版/生产:前端构建产物挂在 /app(存在才挂,开发模式仍走 Vite 5173)
-_FRONTEND_DIST = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "frontend",
-    "dist",
+from app.paths import IS_FROZEN, resource_path
+
+_FRONTEND_DIST = (
+    resource_path("frontend_dist")
+    if IS_FROZEN
+    else os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "frontend",
+        "dist",
+    )
 )
 if os.path.isdir(_FRONTEND_DIST):
     app.mount("/app", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")

@@ -10,7 +10,9 @@ from typing import Optional
 from app.models.schemas import AssetTier, Broker, Session
 from app.templates import registry
 
-_BROKERS_PATH = Path(__file__).resolve().parents[1] / "data" / "brokers_mock.json"
+from app.paths import resource_path
+
+_BROKERS_PATH = Path(resource_path("app", "data", "brokers_mock.json"))
 
 # 资产档定价 (USD per qualified lead)
 PRICE_BY_TIER: dict[AssetTier, float] = {

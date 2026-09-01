@@ -15,7 +15,9 @@ from app.models.schemas import KnowledgeChunk
 
 logger = logging.getLogger("whiteboard-advisor.rag")
 
-_SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "knowledge_seed.json"
+from app.paths import resource_path
+
+_SEED_PATH = Path(resource_path("app", "data", "knowledge_seed.json"))
 
 
 @lru_cache(maxsize=1)

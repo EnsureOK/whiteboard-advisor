@@ -26,9 +26,9 @@ from app.services import embedding as emb
 
 logger = logging.getLogger("whiteboard-advisor.kb")
 
-UPLOAD_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "uploads"
-)
+from app.paths import data_path
+
+UPLOAD_DIR = data_path("uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 CHUNK_SIZE = 500       # 单 chunk 目标长度(字符)

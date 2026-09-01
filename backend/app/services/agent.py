@@ -30,9 +30,11 @@ except ImportError:  # SDK 未安装时 agent_available() 返回 False,不会走
 
 logger = logging.getLogger("whiteboard-advisor.agent")
 
-_SOUL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "soul.md"
-)
+from app.paths import IS_FROZEN, data_path, resource_path
+
+# 源码运行: backend/soul.md(仓库内可编辑);打包运行: 数据目录 soul.md
+# (首启由 desktop 壳从打包资源复制,团队可直接改本地文件,热加载生效)
+_SOUL_PATH = data_path("soul.md") if IS_FROZEN else resource_path("soul.md")
 _soul_cache: tuple[float, str] = (0.0, "")
 
 _TYPE_LABEL = {"personal": "个人客户", "family": "家庭客户", "company": "企业客户"}
