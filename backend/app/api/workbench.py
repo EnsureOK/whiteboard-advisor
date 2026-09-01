@@ -115,10 +115,8 @@ class TaskCreate(BaseModel):
 
 class ApproveBody(BaseModel):
     plan: Optional[list[dict]] = None
-
-
-class ConfirmBody(BaseModel):
-    eventId: str
+    # 服务端自动执行(默认);False 时由调用方自行 step(测试用)
+    auto: bool = True
 
 
 class ChatBody(BaseModel):
@@ -715,6 +713,58 @@ async def revise_task(task_id: str, body: ReviseBody, db: OrmSession = Depends(g
     return store.task_out(task)
 
 
+async def _auto_run_task(task_id: str) -> None:
+    """服务端驱动的任务执行:循环 step 直到完成/等审批/失败。
+
+    经纪人离开页面任务照跑;审批确认(confirm 端点)后再次拉起本协程续跑。
+    """
+    from app.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task or task.status in ("done", "failed"):
+            return
+        if task.status in ("planned", "approved"):
+            task.status = "running"
+            db.commit()
+        for _ in range(30):  # 步数上限,防御死循环
+            try:
+                event, awaiting = await task_engine.execute_step(db, task)
+            except ValueError:
+                break  # no pending step
+            except Exception as e:  # noqa: BLE001
+                logger.warning("auto run step failed: %s", e)
+                task.status = "failed"
+                db.commit()
+                return
+            if awaiting:
+                return  # 停在审批卡,等经纪人确认
+            events = db.query(TaskEvent).filter(TaskEvent.task_id == task.id).all()
+            plan = store.parse_plan(task.plan_json)
+            if sum(1 for ev in events if ev.status in ("done", "confirmed")) >= len(plan):
+                task.status = "done"
+                db.commit()
+                _notify_task_done(db, task)
+                return
+            await asyncio.sleep(0.65)  # 节奏感:时间线逐步点亮
+    finally:
+        db.close()
+
+
+def _notify_task_done(db: OrmSession, task: Task) -> None:
+    """任务完成通知:企微群机器人(配置了才发,失败不影响任务)。"""
+    try:
+        c = db.get(Client, task.client_id)
+        from app.services import wecom
+
+        asyncio.get_running_loop().create_task(
+            wecom.push_markdown(f"✅ 任务完成:**{task.title}**\n工件已生成,可在工作台查看{('(' + c.name + ')') if c else ''}")
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 @router.post("/tasks/{task_id}/approve")
 async def approve_task(task_id: str, body: ApproveBody, db: OrmSession = Depends(get_db)) -> dict:
     task = db.get(Task, kb.check_id(task_id, "task id"))
@@ -725,6 +775,8 @@ async def approve_task(task_id: str, body: ApproveBody, db: OrmSession = Depends
     task.status = "approved"
     db.commit()
     db.refresh(task)
+    if body.auto:
+        asyncio.get_running_loop().create_task(_auto_run_task(task.id))
     return store.task_out(task)
 
 
@@ -749,6 +801,11 @@ async def step_task(task_id: str, db: OrmSession = Depends(get_db)) -> dict:
     return {"event": store.event_out(event), "awaiting": awaiting, "taskStatus": task.status}
 
 
+class ConfirmBody(BaseModel):
+    eventId: str
+    auto: bool = True
+
+
 @router.post("/tasks/{task_id}/confirm")
 async def confirm_task_event(task_id: str, body: ConfirmBody, db: OrmSession = Depends(get_db)) -> dict:
     task = db.get(Task, kb.check_id(task_id, "task id"))
@@ -758,7 +815,42 @@ async def confirm_task_event(task_id: str, body: ConfirmBody, db: OrmSession = D
         event = task_engine.confirm_event(db, task, body.eventId)
     except ValueError as e:
         raise HTTPException(409, str(e))
+    if body.auto:
+        # 审批通过,服务端续跑
+        asyncio.get_running_loop().create_task(_auto_run_task(task.id))
     return {"event": store.event_out(event)}
+
+
+@router.get("/tasks")
+async def list_tasks(
+    clientId: Optional[str] = None, db: OrmSession = Depends(get_db)
+) -> list[dict]:
+    """任务中心:全部任务(可按客户过滤),倒序,轻量序列化(不带事件明细)。"""
+    q = db.query(Task)
+    if clientId:
+        q = q.filter(Task.client_id == clientId)
+    rows = q.order_by(Task.created_at.desc()).limit(100).all()
+    client_names = {c.id: c.name for c in db.query(Client).all()}
+    out = []
+    for t in rows:
+        plan = store.parse_plan(t.plan_json)
+        done = sum(1 for e in t.events if e.status in ("done", "confirmed"))
+        waiting = any(e.status == "waiting_confirm" for e in t.events)
+        out.append(
+            {
+                "id": t.id,
+                "clientId": t.client_id,
+                "clientName": client_names.get(t.client_id, ""),
+                "title": t.title,
+                "kind": t.kind,
+                "status": "waiting_confirm" if waiting and t.status == "running" else t.status,
+                "stepsDone": done,
+                "stepsTotal": len(plan),
+                "createdAt": t.created_at,
+                "updatedAt": t.updated_at,
+            }
+        )
+    return out
 
 
 # ---------- Artifacts ----------

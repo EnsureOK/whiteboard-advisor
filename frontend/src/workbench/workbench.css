@@ -1003,6 +1003,56 @@
 }
 .wb-login-switch:hover { color: var(--w-ink); text-decoration: underline; }
 
+/* ---------- 任务中心 ---------- */
+
+.wb-tasks { flex: 1; overflow-y: auto; background: var(--w-surface); min-width: 0; }
+.wb-tasks-inner { max-width: 860px; margin: 0 auto; padding: 24px 24px 60px; }
+.wb-tasks-head {
+  font-size: 14px;
+  font-weight: 650;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.wb-tasks-hint { font-size: 11.5px; font-weight: 400; color: var(--w-faint); margin-left: auto; }
+.wb-task-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: none;
+  border-bottom: 1px solid var(--w-line-soft);
+  background: none;
+  text-align: left;
+  color: var(--w-ink);
+  font-size: 13px;
+  border-radius: 7px;
+  transition: background 0.13s ease;
+}
+.wb-task-row:hover { background: var(--w-hover); }
+.wb-task-row > svg { color: var(--w-faint); margin-left: auto; flex-shrink: 0; }
+.wb-task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  min-width: 62px;
+  color: var(--w-muted);
+  flex-shrink: 0;
+}
+.wb-task-status i { width: 6px; height: 6px; border-radius: 50%; background: var(--w-faint); }
+.wb-task-status.ok { color: var(--w-ok-ink); }
+.wb-task-status.ok i { background: var(--w-ok); }
+.wb-task-status.warn { color: var(--w-warn-ink); }
+.wb-task-status.warn i { background: var(--w-warn); animation: wb-pulse 1.2s ease-in-out infinite; }
+.wb-task-status.bad { color: var(--w-bad-ink); }
+.wb-task-status.bad i { background: var(--w-bad); }
+.wb-task-status.run { color: var(--w-ink); }
+.wb-task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.wb-task-meta { font-size: 11px; color: var(--w-faint); flex-shrink: 0; }
+
 /* ---------- 计费视图 ---------- */
 
 .wb-billing { flex: 1; overflow-y: auto; background: var(--w-surface); min-width: 0; }

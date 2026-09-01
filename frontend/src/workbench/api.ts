@@ -296,6 +296,24 @@ export const api = {
 
   artifacts: (clientId: string) => req<ArtifactOut[]>(`/api/workbench/artifacts?clientId=${clientId}`),
 
+  getTask: (id: string) => req<TaskOut>(`/api/workbench/tasks/${id}`),
+
+  listTasks: (clientId?: string) =>
+    req<
+      {
+        id: string;
+        clientId: string;
+        clientName: string;
+        title: string;
+        kind: string;
+        status: string;
+        stepsDone: number;
+        stepsTotal: number;
+        createdAt: string;
+        updatedAt: string;
+      }[]
+    >(`/api/workbench/tasks${clientId ? `?clientId=${clientId}` : ""}`),
+
   createTask: (clientId: string, kind: string, message?: string) =>
     req<TaskOut>("/api/workbench/tasks", {
       method: "POST",

@@ -7,6 +7,7 @@ import ChatPane from "./ChatPane";
 import ArtifactPane from "./ArtifactPane";
 import KnowledgeView from "./KnowledgeView";
 import BillingView from "./BillingView";
+import TasksView from "./TasksView";
 import { Icon } from "./icons";
 
 const fmtCredits = (n: number) => (n >= 10_000 ? `${(n / 1000).toFixed(1)}k` : n.toLocaleString());
@@ -22,7 +23,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function Workbench() {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
-  const [view, setView] = useState<"home" | "kb" | "billing">("home");
+  const [view, setView] = useState<"home" | "kb" | "billing" | "tasks">("home");
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -196,23 +197,26 @@ export default function Workbench() {
     }
   };
 
+  // 任务在服务端自动执行(离开页面照跑);前端轮询刷新时间线
   const runSteps = useCallback(
     async (taskId: string) => {
       setRunning(true);
       try {
         for (;;) {
-          const r = await api.stepTask(taskId);
-          setTask((prev) =>
-            prev && prev.id === taskId
-              ? { ...prev, status: r.taskStatus, events: [...prev.events, r.event] }
-              : prev
-          );
-          if (r.awaiting) return;          // 停在审批卡,等用户确认
-          if (r.taskStatus === "done") break;
-          await sleep(650);                // 节奏感:时间线逐步点亮
+          const t = await api.getTask(taskId);
+          setTask((prev) => (prev && prev.id === taskId ? t : prev));
+          if (t.status === "done") {
+            await refreshArtifacts();
+            showToast("任务完成,工件已生成");
+            break;
+          }
+          if (t.status === "failed") {
+            showToast("任务执行失败,请查看时间线");
+            break;
+          }
+          if (t.events.some((e) => e.status === "waiting_confirm")) return; // 等审批
+          await sleep(900);
         }
-        await refreshArtifacts();
-        showToast("任务完成,工件已生成");
       } catch (e: any) {
         showToast(`执行失败: ${e.message}`);
       } finally {
@@ -325,12 +329,12 @@ export default function Workbench() {
           <Icon name="database" size={18} />
         </button>
         <button
-          className="wb-rail-btn"
-          title={`待办 ${todos.length} 项`}
-          onClick={() => setView("home")}
+          className={"wb-rail-btn" + (view === "tasks" ? " active" : "")}
+          title="任务中心"
+          onClick={() => setView("tasks")}
         >
           <Icon name="listChecks" size={18} />
-          {todos.length > 0 && <span className="wb-badge" />}
+          {(running || streaming) && <span className="wb-badge" />}
         </button>
         <div className="wb-rail-foot">
           <button
@@ -366,6 +370,21 @@ export default function Workbench() {
         <BillingView
           onToast={showToast}
           onAuthChange={(_user, st) => setBilling(st)}
+        />
+      ) : view === "tasks" ? (
+        <TasksView
+          onToast={showToast}
+          onOpenTask={async (clientId, taskId) => {
+            setActiveId(clientId);
+            setView("home");
+            try {
+              const t = await api.getTask(taskId);
+              setTask(t);
+              if (t.status === "running" || t.status === "approved") runSteps(taskId);
+            } catch (e: any) {
+              showToast(`打开任务失败: ${e.message}`);
+            }
+          }}
         />
       ) : view === "kb" ? (
         <KnowledgeView

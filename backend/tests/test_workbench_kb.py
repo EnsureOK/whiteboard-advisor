@@ -213,7 +213,7 @@ def test_task_flow_end_to_end(api_client, test_db):
     task = r.json()
     assert len(task["plan"]) == 5
 
-    r = api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={})
+    r = api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={"auto": False})
     assert r.json()["status"] == "approved"
 
     approval_seen = False
@@ -221,7 +221,7 @@ def test_task_flow_end_to_end(api_client, test_db):
         s = api_client.post(f"/api/workbench/tasks/{task['id']}/step").json()
         if s["awaiting"]:
             approval_seen = True
-            cf = api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"]})
+            cf = api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"], "auto": False})
             assert cf.json()["event"]["status"] == "confirmed"
         elif s["taskStatus"] == "done":
             break
@@ -247,11 +247,11 @@ def test_company_review_uses_company_cols(api_client, test_db):
 
     r = api_client.post("/api/workbench/tasks", json={"clientId": c.id, "kind": "policy_review"})
     task = r.json()
-    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={})
+    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={"auto": False})
     for _ in range(6):
         s = api_client.post(f"/api/workbench/tasks/{task['id']}/step").json()
         if s["awaiting"]:
-            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"]})
+            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"], "auto": False})
         elif s["taskStatus"] == "done":
             break
 
@@ -277,11 +277,11 @@ def test_doc_compose_and_office_export(api_client, test_db):
 
     r = api_client.post("/api/workbench/tasks", json={"clientId": c.id, "kind": "generate_plan"})
     task = r.json()
-    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={})
+    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={"auto": False})
     for _ in range(8):
         s = api_client.post(f"/api/workbench/tasks/{task['id']}/step").json()
         if s["awaiting"]:
-            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"]})
+            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"], "auto": False})
         elif s["taskStatus"] == "done":
             break
 
@@ -302,11 +302,11 @@ def test_doc_compose_and_office_export(api_client, test_db):
     # 矩阵 -> xlsx
     r = api_client.post("/api/workbench/tasks", json={"clientId": c.id, "kind": "policy_review"})
     task = r.json()
-    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={})
+    api_client.post(f"/api/workbench/tasks/{task['id']}/approve", json={"auto": False})
     for _ in range(8):
         s = api_client.post(f"/api/workbench/tasks/{task['id']}/step").json()
         if s["awaiting"]:
-            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"]})
+            api_client.post(f"/api/workbench/tasks/{task['id']}/confirm", json={"eventId": s["event"]["id"], "auto": False})
         elif s["taskStatus"] == "done":
             break
     arts = api_client.get("/api/workbench/artifacts", params={"clientId": c.id}).json()
