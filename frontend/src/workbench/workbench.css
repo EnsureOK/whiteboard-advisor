@@ -314,7 +314,36 @@
   padding: 3.5px 14px 3.5px 31px;
   font-size: 12.5px;
   color: var(--w-ink);
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+  transition: background 0.13s ease;
 }
+.wb-member:hover { background: var(--w-hover); }
+.wb-member.focused { background: var(--w-active); }
+.wb-member.focused .wb-avatar { background: var(--w-ink); color: #fff; }
+
+.wb-focus-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 550;
+  border: 1px solid var(--w-ink);
+  border-radius: 6px;
+  padding: 1px 4px 1px 8px;
+  color: var(--w-ink);
+}
+.wb-focus-chip button {
+  border: none;
+  background: none;
+  color: var(--w-muted);
+  display: flex;
+  padding: 2px;
+  border-radius: 4px;
+}
+.wb-focus-chip button:hover { color: var(--w-ink); background: var(--w-hover); }
 .wb-avatar {
   width: 20px;
   height: 20px;

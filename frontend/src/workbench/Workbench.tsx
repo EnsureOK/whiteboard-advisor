@@ -28,6 +28,7 @@ export default function Workbench() {
   const [clients, setClients] = useState<Client[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [focusMemberId, setFocusMemberId] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageOut[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactOut[]>([]);
   const [task, setTask] = useState<TaskOut | null>(null);
@@ -82,10 +83,11 @@ export default function Workbench() {
     }
   }, []);
 
-  // 切换客户 -> 加载消息与工件
+  // 切换客户 -> 加载消息与工件,清除成员聚焦
   useEffect(() => {
     if (!activeId) return;
     setTask(null);
+    setFocusMemberId(null);
     api.messages(activeId).then(setMessages).catch(() => setMessages([]));
     api.artifacts(activeId).then(setArtifacts).catch(() => setArtifacts([]));
   }, [activeId]);
@@ -170,7 +172,7 @@ export default function Workbench() {
           }),
         // plan-first:agent 产出计划 → 立即弹计划卡等确认
         onTaskCreated: (t) => setTask(t),
-      });
+      }, focusMemberId);
       patchAssistant((m) => ({
         ...m,
         citations,
@@ -401,15 +403,26 @@ export default function Workbench() {
             clients={clients}
             todos={todos}
             activeId={activeId}
+            focusMemberId={focusMemberId}
             creating={creating}
             briefing={briefing}
             onSelect={setActiveId}
+            onFocusMember={(clientId, memberId) => {
+              if (clientId !== activeId) {
+                setActiveId(clientId);
+                setFocusMemberId(memberId);
+              } else {
+                setFocusMemberId((prev) => (prev === memberId ? null : memberId));
+              }
+            }}
             onCreate={handleCreateClient}
             onOpenTodo={(t) => t.clientId && setActiveId(t.clientId)}
             onToggleTodo={handleToggleTodo}
           />
           <ChatPane
             client={client}
+            focusMember={client.members.find((m) => m.id === focusMemberId) || null}
+            onClearFocus={() => setFocusMemberId(null)}
             messages={messages}
             task={task}
             running={running || streaming}

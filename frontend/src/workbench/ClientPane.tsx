@@ -8,9 +8,12 @@ interface Props {
   clients: Client[];
   todos: Todo[];
   activeId: string | null;
+  focusMemberId: string | null;
   creating: boolean;
   briefing: { date: string; content: string } | null;
   onSelect: (id: string) => void;
+  /** 点选成员进入聚焦对话(再点同一成员取消) */
+  onFocusMember: (clientId: string, memberId: string) => void;
   onCreate: (name: string, type: ClientType, files: File[]) => void;
   onOpenTodo: (todo: Todo) => void;
   onToggleTodo: (todo: Todo) => void;
@@ -45,7 +48,8 @@ function memberBadgeTone(badge: string): string {
 
 /** 左栏:今日待办 + 客户列表(个人/家庭/企业,托管保单与进行中事项聚合) */
 export default function ClientPane({
-  clients, todos, activeId, creating, briefing, onSelect, onCreate, onOpenTodo, onToggleTodo,
+  clients, todos, activeId, focusMemberId, creating, briefing,
+  onSelect, onFocusMember, onCreate, onOpenTodo, onToggleTodo,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(clients.slice(0, 1).map((c) => c.id)));
   const [adding, setAdding] = useState(false);
@@ -149,22 +153,34 @@ export default function ClientPane({
                 )}
               </div>
               {open &&
-                c.members.map((m) => (
-                  <div key={m.id} className="wb-member" onClick={() => onSelect(c.id)}>
-                    <span className="wb-avatar">{m.name.slice(0, 1)}</span>
-                    <span>
-                      {m.name}
-                      <span className="wb-member-rel">
-                        {" "}{m.relation}{m.birthday ? ` · ${m.birthday.slice(0, 4)}` : ""}
+                c.members.map((m) => {
+                  const focused = c.id === activeId && m.id === focusMemberId;
+                  return (
+                    <button
+                      key={m.id}
+                      className={"wb-member" + (focused ? " focused" : "")}
+                      title={focused ? "取消聚焦" : `聚焦 ${m.name}:接下来的问题默认针对 TA`}
+                      onClick={() => onFocusMember(c.id, m.id)}
+                    >
+                      <span className="wb-avatar">{m.name.slice(0, 1)}</span>
+                      <span>
+                        {m.name}
+                        <span className="wb-member-rel">
+                          {" "}{m.relation}{m.birthday ? ` · ${m.birthday.slice(0, 4)}` : ""}
+                        </span>
                       </span>
-                    </span>
-                    {m.badge && (
-                      <span className={"wb-tag wb-member-badge " + memberBadgeTone(m.badge)}>
-                        <i />{m.badge}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                      {focused ? (
+                        <span className="wb-tag ok wb-member-badge"><i />对话中</span>
+                      ) : (
+                        m.badge && (
+                          <span className={"wb-tag wb-member-badge " + memberBadgeTone(m.badge)}>
+                            <i />{m.badge}
+                          </span>
+                        )
+                      )}
+                    </button>
+                  );
+                })}
             </div>
           );
         })}

@@ -72,6 +72,8 @@ class AgentDeps:
     client: Client
     # 当前登录经纪人(broker 记忆归属);未登录为 None
     user_id: Optional[str] = None
+    # 聚焦成员 id(经纪人点选了某位成员,问题默认围绕 TA)
+    focus_member_id: Optional[str] = None
     citations: list[dict] = field(default_factory=list)
     # 工具过程记录(持久化+SSE 摘要): {"name","label","summary"}
     tool_events: list[dict] = field(default_factory=list)
@@ -122,12 +124,47 @@ def _memories_block(db: OrmSession, client: Client, user_id: Optional[str]) -> s
     return "\n\n## 长期记忆(此前记住的)\n" + "\n".join(lines)
 
 
+def _focus_member_block(deps: "AgentDeps") -> str:
+    """聚焦成员:该成员的档案+名下保单+涉及 TA 的事项,问题默认围绕 TA。"""
+    if not deps.focus_member_id:
+        return ""
+    c = deps.client
+    m = next((x for x in c.members if x.id == deps.focus_member_id), None)
+    if m is None:
+        return ""
+    policies = [p for p in c.policies if p.member_id == m.id]
+    policy_text = (
+        ";".join(
+            f"{p.line}《{p.product_name or '未名产品'}》保额{p.amount // 10000}万"
+            f"({POLICY_STATUSES.get(p.status, p.status)},到期{p.expiry_date or '长期'})"
+            for p in policies
+        )
+        or "名下暂无托管保单"
+    )
+    engagements = (
+        ";".join(
+            f"{ENGAGEMENT_KINDS.get(e.kind, e.kind)}:{e.title}"
+            for e in c.engagements
+            if e.status == "open" and (m.name in (e.title or "") or e.policy_id in {p.id for p in policies})
+        )
+        or "无"
+    )
+    return (
+        f"\n\n## 当前聚焦成员(经纪人正在问 TA 的事)\n"
+        f"- {m.name} | {m.relation} | 生日:{m.birthday or '未知'} | 状态:{m.badge or '无'} | 备注:{m.notes or '无'}\n"
+        f"- 名下保单: {policy_text}\n"
+        f"- 相关进行中事项: {engagements}\n"
+        f"- 未指明对象的问题默认针对 {m.name};涉及其他成员时可正常回答并说明对象。"
+    )
+
+
 def _build_instructions(deps: "AgentDeps") -> str:
     client = deps.client
     return (
         load_soul()
         + "\n\n## 当前上下文\n"
         + _client_brief(client)
+        + _focus_member_block(deps)
         + _memories_block(deps.db, client, deps.user_id)
         + "\n\n## 工具使用\n"
         "- 回答涉及保单、保障、客户情况时,先调用相应工具获取事实。\n"
@@ -415,6 +452,7 @@ async def run_agent_stream(
     history: list[dict],
     message: str,
     user_id: Optional[str] = None,
+    focus_member_id: Optional[str] = None,
 ) -> AsyncIterator[dict]:
     """跑 agent loop,产出 SSE 友好的事件字典流。
 
@@ -424,7 +462,7 @@ async def run_agent_stream(
     """
     from agents import Runner
 
-    deps = AgentDeps(db=db, client=client, user_id=user_id)
+    deps = AgentDeps(db=db, client=client, user_id=user_id, focus_member_id=focus_member_id)
     agent = build_agent()
 
     input_items: list[Any] = []

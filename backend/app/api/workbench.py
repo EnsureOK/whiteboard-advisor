@@ -130,6 +130,8 @@ class ApproveBody(BaseModel):
 class ChatBody(BaseModel):
     clientId: str
     message: str
+    # 聚焦成员:经纪人点选了某位家庭成员/联系人,问题默认针对 TA
+    memberId: Optional[str] = None
 
 
 class TodoPatch(BaseModel):
@@ -511,6 +513,7 @@ async def chat(
     history = [{"role": m.role, "content": m.content} for m in history_rows if m.content.strip()]
     client_id = c.id
     client_name = c.name
+    focus_member_id = body.memberId if body.memberId and any(m.id == body.memberId for m in c.members) else None
 
     from app.db import SessionLocal
     from app.services.agent import agent_available, run_agent_stream
@@ -527,7 +530,9 @@ async def chat(
                 buffer: list[str] = []
                 usage_tokens = 0
                 try:
-                    async for ev in run_agent_stream(db2, c2, history, message, user_id=user_id):
+                    async for ev in run_agent_stream(
+                        db2, c2, history, message, user_id=user_id, focus_member_id=focus_member_id
+                    ):
                         if ev["type"] == "delta":
                             buffer.append(ev["text"])
                             yield _sse({"type": "delta", "text": ev["text"]})

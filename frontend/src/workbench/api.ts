@@ -484,12 +484,13 @@ export interface ChatStreamHandlers {
 export async function chatStream(
   clientId: string,
   message: string,
-  handlers: ChatStreamHandlers
+  handlers: ChatStreamHandlers,
+  memberId?: string | null
 ): Promise<{ citations: Citation[]; toolEvents: ToolEvent[]; content?: string }> {
   const resp = await fetch("/api/workbench/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ clientId, message }),
+    body: JSON.stringify({ clientId, message, memberId: memberId || undefined }),
   });
   if (!resp.ok || !resp.body) {
     const detail = await resp.json().catch(() => ({}));

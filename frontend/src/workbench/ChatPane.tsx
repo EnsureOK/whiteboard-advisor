@@ -6,6 +6,9 @@ import { Markdown } from "./markdown";
 
 interface Props {
   client: Client;
+  /** 聚焦成员:问题默认针对 TA */
+  focusMember?: { id: string; name: string; relation: string } | null;
+  onClearFocus?: () => void;
   messages: MessageOut[];
   task: TaskOut | null;
   running: boolean;
@@ -39,7 +42,7 @@ const SUGGESTS: { label: string; icon: IconName; desc: string }[] = [
 const TYPE_LABEL: Record<string, string> = { personal: "个人", family: "家庭", company: "企业" };
 
 export default function ChatPane({
-  client, messages, task, running, streaming, llmAvailable,
+  client, focusMember, onClearFocus, messages, task, running, streaming, llmAvailable,
   onSend, onQuickCommand, onApprovePlan, onRevisePlan, onConfirmApproval, onToggleRight, onboarding,
 }: Props) {
   const [text, setText] = useState("");
@@ -169,6 +172,14 @@ export default function ChatPane({
         <span className="wb-context-pill">{TYPE_LABEL[client.type] || client.type}</span>
         <span className="wb-context-pill">{client.members.length} 位成员</span>
         <span className="wb-context-pill">托管 {client.policies.length} 单</span>
+        {focusMember && (
+          <span className="wb-focus-chip" title={`接下来的问题默认针对 ${focusMember.name}(${focusMember.relation})`}>
+            聚焦:{focusMember.name}
+            <button onClick={onClearFocus} title="取消聚焦">
+              <Icon name="x" size={11} />
+            </button>
+          </span>
+        )}
         <span className="wb-context-right">
           {openEngagements.slice(0, 3).map((e) => (
             <span key={e.id} className={"wb-tag " + (e.kind === "claim" ? "bad" : e.kind === "underwriting" || e.kind === "renewal" ? "warn" : "")} title={e.title}>
@@ -422,7 +433,11 @@ export default function ChatPane({
               ref={inputRef}
               className="wb-input"
               rows={1}
-              placeholder={`询问,或给 ${client.name} 的助理布置一个任务…`}
+              placeholder={
+                focusMember
+                  ? `问关于 ${focusMember.name} 的问题,或布置任务…`
+                  : `询问,或给 ${client.name} 的助理布置一个任务…`
+              }
               value={text}
               onChange={(e) => { setText(e.target.value); autoGrow(e.target); }}
               onKeyDown={(e) => {
