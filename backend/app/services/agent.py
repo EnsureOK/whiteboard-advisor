@@ -45,7 +45,7 @@ TOOL_LABELS = {
     "get_client_profile": "调取客户档案",
     "list_policies": "调取托管保单",
     "calc_coverage_gaps": "计算保障缺口",
-    "generate_document": "生成文档工件",
+    "create_task_plan": "制定任务计划",
 }
 
 
@@ -71,6 +71,8 @@ class AgentDeps:
     citations: list[dict] = field(default_factory=list)
     # 工具过程记录(持久化+SSE 摘要): {"name","label","summary"}
     tool_events: list[dict] = field(default_factory=list)
+    # create_task_plan 产出的待确认任务(task_out dict),SSE 推给前端弹计划卡
+    created_task: Optional[dict] = None
 
 
 def _client_brief(c: Client) -> str:
@@ -99,7 +101,12 @@ def _build_instructions(client: Client) -> str:
         "- 需要条款、核保规则、理赔材料等资料时,必须真正调用 search_knowledge,拿到结果再回答。\n"
         "- 绝不在回答文本中写出工具名、JSON 调用格式或模拟的调用结果;要用工具就直接调用。\n"
         "- 引用知识库检索结果时在句末标注 [n](与检索返回的编号一致)。\n"
-        "- 工具没有返回的信息不要编造;查不到就说明查不到。"
+        "- 工具没有返回的信息不要编造;查不到就说明查不到。\n"
+        "\n## 任务默认走计划模式(plan-first)\n"
+        "- 经纪人布置任务时(检视保单、生成方案书、准备面谈、写跟进、出文档、或其他多步骤工作),"
+        "必须调用 create_task_plan 产出执行计划,由经纪人确认(可调整)后再执行——不要自己直接完成任务或生成文档。\n"
+        "- 调用 create_task_plan 之后,只用一两句话告知计划已生成、等确认,不要展开执行细节。\n"
+        "- 简单的信息问答(查某张保单、查条款、解释概念)不需要建任务,直接回答。"
     )
 
 
@@ -232,32 +239,41 @@ def build_agent():
         return "\n".join(lines)
 
     @function_tool
-    async def generate_document(ctx: RunContextWrapper[AgentDeps], kind: str) -> str:
-        """为当前客户生成一份文档工件,产出后经纪人可在右侧工作区下载 Word/PPT。
+    async def create_task_plan(ctx: RunContextWrapper[AgentDeps], kind: str, title: str) -> str:
+        """为经纪人布置的任务生成执行计划,交由经纪人确认(可调整)后再执行。
 
         Args:
-            kind: 文档类型,plan=保障方案书 / visit=面谈提纲 / followup=跟进消息。
+            kind: 任务类型,policy_review=保单检视 / generate_plan=保障方案书 /
+                prepare_visit=面谈准备 / followup=客户跟进 / generic=其他。
+            title: 一句话任务标题(经纪人视角,如"给李娜补充重疾方案")。
         """
+        import json as _json
+
+        from app.db_models import Task
         from app.services import task_engine
+        from app.services.workbench_store import task_out
 
         deps = ctx.context
-        kind_map = {"plan": "generate_plan", "visit": "prepare_visit", "followup": "followup"}
-        task_kind = kind_map.get(kind, "followup")
-        doc_type, title, content = await task_engine.compose_doc(deps.db, deps.client, task_kind)
-        artifact = task_engine._save_artifact(  # noqa: SLF001 复用任务引擎的版本管理
-            deps.db, deps.client, None, doc_type, title, content
+        task_kind = kind if kind in ("policy_review", "generate_plan", "prepare_visit", "followup") else "generic"
+        plan = await task_engine.build_plan(task_kind, deps.client, title)
+        task = Task(
+            client_id=deps.client.id,
+            title=f"{deps.client.name}·{title[:40]}",
+            kind=task_kind,
+            plan_json=_json.dumps(plan, ensure_ascii=False),
         )
+        deps.db.add(task)
+        deps.db.commit()
+        deps.db.refresh(task)
+        deps.created_task = task_out(task)
         deps.tool_events.append(
             {
-                "name": "generate_document",
-                "label": TOOL_LABELS["generate_document"],
-                "summary": f"《{artifact.title}》 v{artifact.version}",
+                "name": "create_task_plan",
+                "label": TOOL_LABELS["create_task_plan"],
+                "summary": f"{len(plan)} 步 · 待确认",
             }
         )
-        return (
-            f"已生成工件《{artifact.title}》第 {artifact.version} 版,包含 {len(content['sections'])} 个小节,"
-            "经纪人可在右侧工作区查看并下载 Word/PPT。"
-        )
+        return "计划已生成并展示给经纪人确认(可手动调整或让你修改),不要继续执行,回复一句话说明即可。"
 
     from agents import Agent as _Agent
 
@@ -265,7 +281,7 @@ def build_agent():
         name="broker-assistant",
         instructions=lambda ctx, agent: _build_instructions(ctx.context.client),
         model=model,
-        tools=[search_knowledge, get_client_profile, list_policies, calc_coverage_gaps, generate_document],
+        tools=[search_knowledge, get_client_profile, list_policies, calc_coverage_gaps, create_task_plan],
     )
 
 
@@ -321,6 +337,10 @@ async def run_agent_stream(
                     name, label = "", ""
                 emitted_ends += 1
                 yield {"type": "tool_end", "name": name, "label": label, "summary": summary}
+                if deps.created_task is not None:
+                    # plan-first:任务计划已建,立即推给前端弹计划卡
+                    yield {"type": "task_created", "task": deps.created_task}
+                    deps.created_task = None
         elif ev.type == "raw_response_event":
             data = ev.data
             if getattr(data, "type", "") == "response.output_text.delta":

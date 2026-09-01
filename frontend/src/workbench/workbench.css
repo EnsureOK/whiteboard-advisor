@@ -540,6 +540,31 @@
 .wb-plan-step svg { color: var(--w-faint); flex-shrink: 0; }
 .wb-card-actions { display: flex; gap: 8px; padding: 2px 14px 12px; }
 
+/* 计划编辑态 */
+.wb-plan-edit { display: flex; flex-direction: column; gap: 6px; }
+.wb-plan-edit-row { display: flex; gap: 8px; align-items: center; }
+.wb-plan-edit-row .wb-plan-num {
+  width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid var(--w-line); color: var(--w-muted);
+  font-size: 11px; display: flex; align-items: center; justify-content: center;
+}
+.wb-plan-edit-row .wb-text-input { flex: 1; }
+.wb-plan-edit-del {
+  border: none; background: none; color: var(--w-faint);
+  width: 24px; height: 24px; border-radius: 5px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.wb-plan-edit-del:hover { color: var(--w-bad); background: var(--w-hover); }
+.wb-plan-add {
+  border: 1px dashed var(--w-line); background: none; border-radius: 7px;
+  padding: 5px; color: var(--w-muted); font-size: 12px;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  margin-left: 28px;
+}
+.wb-plan-add:hover { color: var(--w-ink); border-color: var(--w-faint); }
+.wb-plan-revise { display: flex; gap: 8px; padding: 4px 14px 8px; }
+.wb-plan-revise .wb-text-input { flex: 1; }
+
 .wb-btn {
   border: none;
   border-radius: 7px;
@@ -876,6 +901,59 @@
 .wb-hit-head { display: flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 550; }
 .wb-hit-score { color: var(--w-muted); font-size: 11px; font-family: var(--w-mono); margin-left: auto; }
 .wb-hit-text { font-size: 12px; color: var(--w-muted); margin-top: 4px; white-space: pre-wrap; max-height: 110px; overflow-y: auto; }
+
+/* ---------- 使用引导 ---------- */
+
+.wb-onboard {
+  border: 1px solid var(--w-line);
+  border-radius: 12px;
+  background: var(--w-bg);
+  padding: 12px 14px 8px;
+  box-shadow: var(--w-shadow-card);
+}
+.wb-onboard-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.wb-onboard-title { font-size: 13px; font-weight: 650; display: flex; align-items: center; gap: 6px; }
+.wb-onboard-title svg { color: var(--w-muted); }
+.wb-onboard-close { border: none; background: none; color: var(--w-faint); width: 22px; height: 22px; border-radius: 5px; display: flex; align-items: center; justify-content: center; }
+.wb-onboard-close:hover { background: var(--w-hover); color: var(--w-ink); }
+.wb-onboard-step { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-top: 1px solid var(--w-line-soft); }
+.wb-onboard-step:first-of-type { border-top: none; }
+.wb-onboard-num {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid var(--w-line); color: var(--w-muted);
+  font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+  font-family: var(--w-mono);
+}
+.wb-onboard-step.done .wb-onboard-num { border-color: var(--w-ok); background: var(--w-ok-soft); color: var(--w-ok-ink); }
+.wb-onboard-step.done .wb-onboard-step-title { color: var(--w-muted); text-decoration: line-through; }
+.wb-onboard-step-title { font-size: 13px; font-weight: 600; }
+.wb-onboard-step-desc { font-size: 12px; color: var(--w-muted); margin-top: 1px; line-height: 1.55; }
+.wb-onboard-step .wb-btn { flex-shrink: 0; }
+
+/* 领取免费积分卡 */
+.wb-claim-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--w-ink);
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 12px;
+  background: var(--w-surface);
+}
+.wb-claim-title { font-size: 14px; font-weight: 650; }
+.wb-claim-sub { font-size: 12px; color: var(--w-muted); margin-top: 2px; }
+.wb-claim-card .wb-btn { margin-left: auto; flex-shrink: 0; }
+
+.wb-login-head { margin-bottom: 4px; }
+.wb-login-title { font-size: 15px; font-weight: 650; }
+.wb-login-sub { font-size: 12px; color: var(--w-muted); margin-top: 2px; }
+.wb-login-switch {
+  border: none; background: none; color: var(--w-faint);
+  font-size: 12px; align-self: center; padding: 2px;
+}
+.wb-login-switch:hover { color: var(--w-ink); text-decoration: underline; }
 
 /* ---------- 计费视图 ---------- */
 

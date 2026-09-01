@@ -316,7 +316,7 @@ def seed() -> None:
 
 
 def ensure_seeded() -> bool:
-    """首启初始化:没有任何客户才灌演示数据。返回是否执行了 seed。"""
+    """开发/演示环境:没有任何客户才灌 4 个演示客户。返回是否执行了 seed。"""
     from app.db import SessionLocal
 
     db = SessionLocal()
@@ -327,3 +327,110 @@ def ensure_seeded() -> bool:
         db.close()
     seed()
     return True
+
+
+# ---------- 正式版首启:标准案例(单个示例客户) + 全局知识文档 ----------
+
+STARTER_CLIENT = {
+    "name": "示例·陈家明一家",
+    "type": "family",
+    "notes": "这是内置示例客户:可放心体验检视保单、生成方案、对话提问,不影响你的真实客户数据。",
+    "next_contact": None,
+    "members": [
+        {"name": "陈家明", "relation": "本人", "badge": "已承保", "birthday": "1985-06-18", "notes": "企业中层,家庭支柱"},
+        {"name": "林晓芸", "relation": "配偶", "badge": "方案中", "birthday": "1988-02-09", "notes": "关注重疾保障"},
+        {"name": "陈天天", "relation": "子女", "badge": "", "birthday": "2016-09-01", "notes": ""},
+    ],
+    "policies": [
+        (0, "重疾险", "康宁无忧重疾", "中国人寿", 500_000, 12_600, "2022-04-15", None, "active"),
+        (0, "医疗险", "安享百万医疗", "人保健康", 2_000_000, 850, "2025-12-01", "2026-11-30", "active"),
+        (1, "定期寿险", "守护家定期寿", "太平洋人寿", 1_000_000, 1_450, "2023-08-20", None, "active"),
+    ],
+    "engagements": [
+        ("proposal", "林晓芸重疾方案在谈", "重疾险", None, "预算 8 千-1 万/年,倾向多次赔付"),
+        ("renewal", "陈家明医疗险续期跟进", "医疗险", 1, "2026-11-30 到期,提前一个月确认续保"),
+    ],
+}
+
+
+def ensure_starter_content() -> bool:
+    """正式版首启:不灌演示客户群,只放 1 个标注清楚的示例客户 + 全局知识文档
+    + 1 条体验待办。库里已有客户则跳过。返回是否执行。"""
+    from app.db import SessionLocal
+
+    db = SessionLocal()
+    try:
+        if db.query(Client).count() > 0:
+            return False
+
+        spec = STARTER_CLIENT
+        c = Client(
+            name=spec["name"],
+            client_type=spec["type"],
+            notes=spec["notes"],
+            next_contact=spec["next_contact"],
+        )
+        db.add(c)
+        db.flush()
+        members: list[Member] = []
+        for i, m in enumerate(spec["members"]):
+            member = Member(client_id=c.id, seq=i, **m)
+            db.add(member)
+            members.append(member)
+        db.flush()
+        policies: list[Policy] = []
+        for (midx, line, product, insurer, amount, premium, eff, exp, status) in spec["policies"]:
+            p = Policy(
+                client_id=c.id,
+                member_id=members[midx].id if midx is not None else None,
+                line=line,
+                product_name=product,
+                insurer=insurer,
+                amount=amount,
+                premium=premium,
+                effective_date=eff,
+                expiry_date=exp,
+                status=status,
+            )
+            db.add(p)
+            policies.append(p)
+        db.flush()
+        for (kind, title, line, pidx, note) in spec["engagements"]:
+            db.add(
+                Engagement(
+                    client_id=c.id,
+                    kind=kind,
+                    title=title,
+                    line=line,
+                    policy_id=policies[pidx].id if pidx is not None else None,
+                    note=note,
+                )
+            )
+        db.add(
+            Todo(
+                title="【体验】给示例客户做一次保单检视",
+                detail="点开左侧「示例·陈家明一家」,发送快捷指令「检视保单」,看 AI 如何逐步执行并生成矩阵。",
+                priority="normal",
+                client_id=c.id,
+            )
+        )
+        db.commit()
+
+        # 全局知识文档(通用核保/产品/财险知识,正式使用同样需要;去掉演示标注)
+        async def _kb():
+            for doc_spec in SEED_KB_DOCS:
+                text = doc_spec["text"].replace("(演示种子文档)", "").strip()
+                doc = kb.create_document(
+                    db,
+                    title=doc_spec["title"],
+                    doc_type="text",
+                    raw=text.encode("utf-8"),
+                    tags=doc_spec["tags"],
+                    scope=doc_spec["scope"],
+                )
+                await kb.index_inline_text(db, doc, text)
+
+        asyncio.run(_kb())
+        return True
+    finally:
+        db.close()

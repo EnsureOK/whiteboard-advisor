@@ -525,7 +525,7 @@ async def chat(
                         if ev["type"] == "delta":
                             buffer.append(ev["text"])
                             yield _sse({"type": "delta", "text": ev["text"]})
-                        elif ev["type"] in ("tool_start", "tool_end"):
+                        elif ev["type"] in ("tool_start", "tool_end", "task_created"):
                             yield _sse(ev)
                         elif ev["type"] == "final":
                             citations = ev["citations"]
@@ -667,7 +667,7 @@ async def create_task(
 
         if not credits.has_credits(db, user):
             raise HTTPException(402, "积分不足:请续费套餐或购买积分包")
-    plan = task_engine.build_plan(body.kind, c, body.message or "")
+    plan = await task_engine.build_plan(body.kind, c, body.message or "")
     title = body.title or f"{c.name}·{(body.message or body.kind)[:40]}"
     task = Task(
         client_id=c.id,
@@ -687,6 +687,31 @@ async def get_task(task_id: str, db: OrmSession = Depends(get_db)) -> dict:
     task = db.get(Task, kb.check_id(task_id, "task id"))
     if not task:
         raise HTTPException(404, "task not found")
+    return store.task_out(task)
+
+
+class ReviseBody(BaseModel):
+    instruction: str
+
+
+@router.post("/tasks/{task_id}/revise")
+async def revise_task(task_id: str, body: ReviseBody, db: OrmSession = Depends(get_db)) -> dict:
+    """让 AI 按经纪人的意见调整计划(仅待确认状态)。"""
+    task = db.get(Task, kb.check_id(task_id, "task id"))
+    if not task:
+        raise HTTPException(404, "task not found")
+    if task.status != "planned":
+        raise HTTPException(409, "计划已确认,无法再调整")
+    instruction = body.instruction.strip()
+    if not instruction:
+        raise HTTPException(400, "请描述要怎么改")
+    c = _get_client_or_404(db, task.client_id)
+    new_plan = await task_engine.revise_plan(c, store.parse_plan(task.plan_json), instruction)
+    if new_plan is None:
+        raise HTTPException(503, "AI 计划调整暂不可用(未配置模型),可直接手动编辑步骤")
+    task.plan_json = json.dumps(new_plan, ensure_ascii=False)
+    db.commit()
+    db.refresh(task)
     return store.task_out(task)
 
 

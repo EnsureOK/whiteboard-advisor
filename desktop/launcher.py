@@ -89,11 +89,11 @@ def _first_run_setup() -> None:
             shutil.copyfile(tpl, soul_path)
 
     from app.db import init_db
-    from app.services.demo_seed import ensure_seeded
+    from app.services.demo_seed import ensure_starter_content
 
     init_db()
-    if ensure_seeded():
-        print("首次启动:已初始化演示数据。")
+    if ensure_starter_content():
+        print("首次启动:已就绪(内置示例客户与知识库)。")
 
 
 def start_backend_in_thread(port: int) -> None:

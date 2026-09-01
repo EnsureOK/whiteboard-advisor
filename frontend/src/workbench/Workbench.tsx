@@ -34,6 +34,9 @@ export default function Workbench() {
   const [streaming, setStreaming] = useState(false);
   const [creating, setCreating] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(
+    () => !localStorage.getItem("wb_onboarding_dismissed")
+  );
   const [toast, setToast] = useState<string | null>(null);
 
   const client = clients.find((c) => c.id === activeId) || null;
@@ -131,6 +134,8 @@ export default function Workbench() {
             else list.push(ev);
             return { ...m, toolEvents: list };
           }),
+        // plan-first:agent 产出计划 → 立即弹计划卡等确认
+        onTaskCreated: (t) => setTask(t),
       });
       patchAssistant((m) => ({
         ...m,
@@ -139,10 +144,6 @@ export default function Workbench() {
         // 服务端可能清洗过全文(剔除伪工具调用),以它为准
         ...(content !== undefined ? { content } : {}),
       }));
-      // agent 可能在对话中生成了工件(generate_document)
-      if (toolEvents.some((t) => t.name === "generate_document")) {
-        await refreshArtifacts();
-      }
       refreshBilling();
     } catch (e: any) {
       showToast(`对话失败: ${e.message}`);
@@ -188,14 +189,25 @@ export default function Workbench() {
     [refreshArtifacts, showToast]
   );
 
-  const handleApprovePlan = async () => {
+  const handleApprovePlan = async (plan?: { tool: string; title: string; query?: string }[]) => {
     if (!task) return;
     try {
-      const t = await api.approveTask(task.id);
+      const t = await api.approveTask(task.id, plan);
       setTask({ ...t, events: [] });
       runSteps(task.id);
     } catch (e: any) {
       showToast(`确认失败: ${e.message}`);
+    }
+  };
+
+  const handleRevisePlan = async (instruction: string) => {
+    if (!task) return;
+    try {
+      const t = await api.reviseTask(task.id, instruction);
+      setTask(t);
+      showToast("计划已按你的意见调整");
+    } catch (e: any) {
+      showToast(`调整失败: ${e.message}`);
     }
   };
 
@@ -289,6 +301,17 @@ export default function Workbench() {
         </button>
         <div className="wb-rail-foot">
           <button
+            className="wb-rail-btn"
+            title="使用指南"
+            onClick={() => {
+              localStorage.removeItem("wb_onboarding_dismissed");
+              setShowOnboarding(true);
+              setView("home");
+            }}
+          >
+            <Icon name="help" size={17} />
+          </button>
+          <button
             className={"wb-rail-credits" + (view === "billing" ? " active" : "")}
             title={billing ? `可用 ${billing.credits.totalCredits.toLocaleString()} 积分` : "登录 / 套餐与积分"}
             onClick={() => setView("billing")}
@@ -341,8 +364,19 @@ export default function Workbench() {
             onSend={handleSend}
             onQuickCommand={handleQuickCommand}
             onApprovePlan={handleApprovePlan}
+            onRevisePlan={handleRevisePlan}
             onConfirmApproval={handleConfirmApproval}
             onToggleRight={() => setRightOpen((v) => !v)}
+            onboarding={{
+              visible: showOnboarding,
+              loggedIn: !!billing,
+              welcomeClaimed: !!billing?.welcomeClaimed,
+              onDismiss: () => {
+                localStorage.setItem("wb_onboarding_dismissed", "1");
+                setShowOnboarding(false);
+              },
+              onGoBilling: () => setView("billing"),
+            }}
           />
           <ArtifactPane artifacts={artifacts} running={running} open={rightOpen} />
         </>

@@ -77,18 +77,42 @@ def test_plan_expiry_clears_plan_pool(test_db):
     assert credits.has_credits(test_db, u)  # pack 池仍可用
 
 
-def test_register_grants_signup_bonus_and_demo_checkout(api_client, test_db, monkeypatch):
+def test_sms_login_claim_and_demo_checkout(api_client, test_db, monkeypatch):
     # 与本机 .env 解耦:强制走演示通道
     from app.config import settings as app_settings
+    from app.db_models import SmsCode
 
     monkeypatch.setattr(app_settings, "stripe_api_key", "")
-    r = api_client.post("/api/auth/register", json={"username": "tester01", "password": "password8"})
+
+    # 手机号验证码登录(outbox 通道):发送 → 从库里取码 → 校验 → 自动建号
+    r = api_client.post("/api/auth/sms/send", json={"phone": "13800001111"})
+    assert r.status_code == 200 and r.json()["provider"] == "outbox"
+    # 冷却期内重复发送被拒
+    assert api_client.post("/api/auth/sms/send", json={"phone": "13800001111"}).status_code == 429
+    code = (
+        test_db.query(SmsCode)
+        .filter(SmsCode.phone == "13800001111", SmsCode.status == "pending")
+        .first()
+        .code
+    )
+    bad = api_client.post("/api/auth/sms/verify", json={"phone": "13800001111", "code": "000000"})
+    assert bad.status_code == 401
+    r = api_client.post("/api/auth/sms/verify", json={"phone": "13800001111", "code": code})
     assert r.status_code == 200
     token = r.json()["token"]
+    assert r.json()["user"]["username"] == "13800001111"
     headers = {"Authorization": f"Bearer {token}"}
 
+    # 免费积分:登录后显式领取,幂等
     st = api_client.get("/api/billing/status", headers=headers).json()
-    assert st["credits"]["packCredits"] == 2000.0  # 注册赠礼
+    assert st["welcomeClaimed"] is False and st["credits"]["packCredits"] == 0
+    r = api_client.post("/api/billing/claim-welcome", headers=headers)
+    assert r.json()["claimed"] is True
+    r = api_client.post("/api/billing/claim-welcome", headers=headers)
+    assert r.json()["claimed"] is False and r.json()["alreadyClaimed"] is True
+    st = api_client.get("/api/billing/status", headers=headers).json()
+    assert st["welcomeClaimed"] is True
+    assert st["credits"]["packCredits"] == 2000.0  # 新用户礼
 
     # 演示通道(未配 stripe key):买 basic 直接履约
     r = api_client.post("/api/billing/checkout", json={"item": "basic"}, headers=headers)

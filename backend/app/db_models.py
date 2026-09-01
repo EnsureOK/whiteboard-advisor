@@ -308,7 +308,9 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
     username: Mapped[str] = mapped_column(String(60), unique=True, index=True)
-    # pbkdf2_sha256$iterations$salt_hex$hash_hex
+    # 手机号登录(正式版主路径);老账号密码登录的 username 用户此列为空
+    phone: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True, index=True)
+    # pbkdf2_sha256$iterations$salt_hex$hash_hex;验证码登录创建的用户为空串
     password_hash: Mapped[str] = mapped_column(String(200))
     display_name: Mapped[str] = mapped_column(String(60), default="")
     # free / basic / pro / max
@@ -359,6 +361,21 @@ class Order(Base):
     stripe_session_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
     paid_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+
+
+class SmsCode(Base):
+    """手机验证码(登录):5 分钟有效,同号 60s 冷却,错 5 次作废。"""
+
+    __tablename__ = "sms_codes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    phone: Mapped[str] = mapped_column(String(20), index=True)
+    code: Mapped[str] = mapped_column(String(8))
+    expires_at: Mapped[str] = mapped_column(String(40))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # pending / used / void
+    status: Mapped[str] = mapped_column(String(10), default="pending", index=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
 
 
 class RedeemCode(Base):

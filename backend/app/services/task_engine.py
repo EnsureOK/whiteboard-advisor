@@ -63,10 +63,93 @@ _PLANS: dict[str, list[dict]] = {
 }
 
 
-def build_plan(task_kind: str, client: Client, message: str) -> list[dict]:
-    """生成计划步骤。LLM 可用时由模型细化,否则用模板计划。"""
+# 计划步骤可用的工具白名单(execute_step 能执行的)
+PLAN_TOOLS = {"policy_db", "kb_search", "approval", "gap_calc", "compose", "generic"}
+
+_TOOL_GUIDE = (
+    "policy_db=调取客户档案与托管保单; kb_search=检索知识库(可带 query); "
+    "approval=暂停等经纪人确认(涉敏感信息时用); gap_calc=计算保障缺口; "
+    "compose=生成最终工件(报告/方案书/提纲,一般收尾); generic=其他自定义步骤"
+)
+
+
+def _sanitize_plan(raw: object) -> Optional[list[dict]]:
+    """校验/清洗 LLM 产出的计划:工具白名单、步数 2-8、标题必填。"""
+    if not isinstance(raw, list) or not (2 <= len(raw) <= 8):
+        return None
+    steps: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None
+        title = str(item.get("title", "")).strip()[:80]
+        if not title:
+            return None
+        tool = str(item.get("tool", "generic")).strip()
+        if tool not in PLAN_TOOLS:
+            tool = "generic"
+        step = {"tool": tool, "title": title}
+        if tool == "kb_search" and item.get("query"):
+            step["query"] = str(item["query"])[:120]
+        steps.append(step)
+    return steps
+
+
+async def _llm_plan(prompt: str) -> Optional[list[dict]]:
+    """调千帆产计划 JSON;不可用或解析失败返回 None。"""
+    from app.config import settings
+
+    if not settings.has_llm:
+        return None
+    try:
+        from app.services.llm import _call_qianfan
+
+        raw, _usage = await _call_qianfan([{"role": "user", "content": prompt}], settings.model_fast)
+        start, end = raw.find("["), raw.rfind("]")
+        if start < 0 or end <= start:
+            return None
+        return _sanitize_plan(json.loads(raw[start : end + 1]))
+    except Exception as e:  # noqa: BLE001 起草失败走模板
+        logger.warning("llm plan failed: %s", e)
+        return None
+
+
+def _plan_context(client: Client, message: str) -> str:
+    engagements = ";".join(
+        f"{e.kind}:{e.title}" for e in client.engagements if e.status == "open"
+    ) or "无"
+    return (
+        f"客户: {client.name}({client.client_type}),{len(client.members)} 位成员,"
+        f"托管保单 {len(client.policies)} 份,进行中事项: {engagements}。\n"
+        f"经纪人的要求: {message or '(未附加说明)'}"
+    )
+
+
+async def build_plan(task_kind: str, client: Client, message: str) -> list[dict]:
+    """生成计划步骤:LLM 依据客户上下文定制;不可用时用模板。"""
     base = _PLANS.get(task_kind, _PLANS["followup"])
-    return [dict(step) for step in base]
+    prompt = (
+        "为保险经纪人的智能助理拟一份任务执行计划。\n"
+        f"{_plan_context(client, message)}\n"
+        f"任务类型: {task_kind}。参考模板: {json.dumps(base, ensure_ascii=False)}\n"
+        f"可用工具: {_TOOL_GUIDE}\n"
+        '只输出 JSON 数组,格式 [{"tool":"...","title":"中文步骤标题","query":"仅 kb_search 需要"}],'
+        "3-6 步,结合该客户的实际情况定制标题;涉及体检报告/收入等敏感信息须含一步 approval;最后一步用 compose。"
+    )
+    return (await _llm_plan(prompt)) or [dict(step) for step in base]
+
+
+async def revise_plan(client: Client, current_plan: list[dict], instruction: str) -> Optional[list[dict]]:
+    """按经纪人的修改意见让 LLM 调整计划;LLM 不可用返回 None(由调用方报错)。"""
+    prompt = (
+        "调整保险经纪人智能助理的任务计划。\n"
+        f"{_plan_context(client, '')}\n"
+        f"当前计划: {json.dumps(current_plan, ensure_ascii=False)}\n"
+        f"经纪人的修改意见: {instruction}\n"
+        f"可用工具: {_TOOL_GUIDE}\n"
+        '只输出调整后的完整 JSON 数组,格式 [{"tool":"...","title":"...","query":"仅 kb_search 需要"}],'
+        "保留仍然合理的步骤,按意见增删改;2-8 步。"
+    )
+    return await _llm_plan(prompt)
 
 
 # ---------- 步骤执行 ----------

@@ -13,9 +13,18 @@ interface Props {
   llmAvailable: boolean;
   onSend: (text: string) => void;
   onQuickCommand: (label: string) => void;
-  onApprovePlan: () => void;
+  onApprovePlan: (plan?: { tool: string; title: string; query?: string }[]) => void;
+  onRevisePlan: (instruction: string) => Promise<void> | void;
   onConfirmApproval: (eventId: string) => void;
   onToggleRight?: () => void;
+  /** 使用引导:显示状态与交互 */
+  onboarding?: {
+    visible: boolean;
+    loggedIn: boolean;
+    welcomeClaimed: boolean;
+    onDismiss: () => void;
+    onGoBilling: () => void;
+  };
 }
 
 const QUICK_COMMANDS = ["检视保单", "生成方案", "准备面谈", "写跟进"];
@@ -31,10 +40,21 @@ const TYPE_LABEL: Record<string, string> = { personal: "个人", family: "家庭
 
 export default function ChatPane({
   client, messages, task, running, streaming, llmAvailable,
-  onSend, onQuickCommand, onApprovePlan, onConfirmApproval, onToggleRight,
+  onSend, onQuickCommand, onApprovePlan, onRevisePlan, onConfirmApproval, onToggleRight, onboarding,
 }: Props) {
   const [text, setText] = useState("");
   const [expandedCite, setExpandedCite] = useState<string | null>(null);
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [draftPlan, setDraftPlan] = useState<{ tool: string; title: string; query?: string }[]>([]);
+  const [reviseText, setReviseText] = useState("");
+  const [revising, setRevising] = useState(false);
+
+  // 任务切换/计划被 AI 更新时,退出编辑态并同步草稿
+  useEffect(() => {
+    setEditingPlan(false);
+    setDraftPlan(task?.plan || []);
+    setReviseText("");
+  }, [task?.id, task?.plan]);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -141,6 +161,16 @@ export default function ChatPane({
 
       <div className="wb-chat" ref={listRef}>
         <div className="wb-thread">
+          {onboarding?.visible && (
+            <OnboardingPanel
+              loggedIn={onboarding.loggedIn}
+              welcomeClaimed={onboarding.welcomeClaimed}
+              isSampleClient={client.name.includes("示例")}
+              onDismiss={onboarding.onDismiss}
+              onGoBilling={onboarding.onGoBilling}
+              onTryReview={() => onQuickCommand("检视保单")}
+            />
+          )}
           {messages.length === 0 && !task && (
             <div className="wb-hero">
               <div className="wb-hero-logo"><Icon name="shield" size={17} strokeWidth={2} /></div>
@@ -189,14 +219,44 @@ export default function ChatPane({
               </div>
               <div className="wb-card-body">
                 {task.status === "planned" ? (
-                  <div>
-                    {task.plan.map((s, i) => (
-                      <div key={i} className="wb-plan-step">
-                        <Icon name="circle" size={13} strokeWidth={1.6} />
-                        {s.title}
-                      </div>
-                    ))}
-                  </div>
+                  editingPlan ? (
+                    <div className="wb-plan-edit">
+                      {draftPlan.map((s, i) => (
+                        <div key={i} className="wb-plan-edit-row">
+                          <span className="wb-plan-num wb-mono">{i + 1}</span>
+                          <input
+                            className="wb-text-input"
+                            value={s.title}
+                            onChange={(e) =>
+                              setDraftPlan(draftPlan.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))
+                            }
+                          />
+                          <button
+                            className="wb-plan-edit-del"
+                            title="删除此步"
+                            onClick={() => setDraftPlan(draftPlan.filter((_, j) => j !== i))}
+                          >
+                            <Icon name="x" size={12} />
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        className="wb-plan-add"
+                        onClick={() => setDraftPlan([...draftPlan, { tool: "generic", title: "" }])}
+                      >
+                        <Icon name="plus" size={12} /> 添加步骤
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      {task.plan.map((s, i) => (
+                        <div key={i} className="wb-plan-step">
+                          <Icon name="circle" size={13} strokeWidth={1.6} />
+                          {s.title}
+                        </div>
+                      ))}
+                    </div>
+                  )
                 ) : (
                   <div className="wb-timeline">
                     {task.events.map((e, ei) => {
@@ -237,12 +297,79 @@ export default function ChatPane({
                 )}
               </div>
               {task.status === "planned" && (
-                <div className="wb-card-actions">
-                  <button className="wb-btn" disabled={running} onClick={onApprovePlan}>
-                    按此计划执行
-                  </button>
-                  <button className="wb-btn ghost">调整计划</button>
-                </div>
+                <>
+                  {/* 让 AI 改计划 */}
+                  <div className="wb-plan-revise">
+                    <input
+                      className="wb-text-input"
+                      placeholder="告诉 AI 怎么改,如:去掉审批,加一步生成客户讲解 PPT"
+                      value={reviseText}
+                      onChange={(e) => setReviseText(e.target.value)}
+                      onKeyDown={async (e) => {
+                        if (e.key === "Enter" && reviseText.trim() && !revising) {
+                          setRevising(true);
+                          await onRevisePlan(reviseText.trim());
+                          setReviseText("");
+                          setRevising(false);
+                        }
+                      }}
+                    />
+                    <button
+                      className="wb-btn ghost"
+                      disabled={!reviseText.trim() || revising}
+                      onClick={async () => {
+                        setRevising(true);
+                        await onRevisePlan(reviseText.trim());
+                        setReviseText("");
+                        setRevising(false);
+                      }}
+                    >
+                      {revising ? <Spinner size={12} /> : null}
+                      AI 修改
+                    </button>
+                  </div>
+                  <div className="wb-card-actions">
+                    {editingPlan ? (
+                      <>
+                        <button
+                          className="wb-btn"
+                          disabled={running || draftPlan.every((s) => !s.title.trim())}
+                          onClick={() => {
+                            const cleaned = draftPlan.filter((s) => s.title.trim());
+                            setEditingPlan(false);
+                            onApprovePlan(cleaned);
+                          }}
+                        >
+                          按调整后的计划执行
+                        </button>
+                        <button
+                          className="wb-btn ghost"
+                          onClick={() => {
+                            setDraftPlan(task.plan);
+                            setEditingPlan(false);
+                          }}
+                        >
+                          取消编辑
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button className="wb-btn" disabled={running} onClick={() => onApprovePlan()}>
+                          按此计划执行
+                        </button>
+                        <button
+                          className="wb-btn ghost"
+                          onClick={() => {
+                            setDraftPlan(task.plan.map((s) => ({ ...s })));
+                            setEditingPlan(true);
+                          }}
+                        >
+                          手动调整
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -287,6 +414,81 @@ export default function ChatPane({
         </div>
       </div>
     </main>
+  );
+}
+
+/** 首次使用引导:四步上手,可关闭(rail 问号可重新打开) */
+function OnboardingPanel({
+  loggedIn,
+  welcomeClaimed,
+  isSampleClient,
+  onDismiss,
+  onGoBilling,
+  onTryReview,
+}: {
+  loggedIn: boolean;
+  welcomeClaimed: boolean;
+  isSampleClient: boolean;
+  onDismiss: () => void;
+  onGoBilling: () => void;
+  onTryReview: () => void;
+}) {
+  const step1Done = loggedIn && welcomeClaimed;
+  const steps = [
+    {
+      done: step1Done,
+      title: step1Done ? "已领取免费积分" : "登录并领取 2,000 免费积分",
+      desc: "手机号登录即可,积分用于 AI 对话与文档生成,永不过期。",
+      action: step1Done ? null : { label: loggedIn ? "去领取" : "去登录", onClick: onGoBilling },
+    },
+    {
+      done: false,
+      title: "用示例客户体验一次「检视保单」",
+      desc: isSampleClient
+        ? "就是当前这位——点右侧按钮发起,确认计划后看 AI 逐步执行、生成检视矩阵。"
+        : "点左侧「示例·陈家明一家」,再发送快捷指令「检视保单」。",
+      action: isSampleClient ? { label: "立即发起", onClick: onTryReview } : null,
+    },
+    {
+      done: false,
+      title: "新增你的第一个真实客户",
+      desc: "左栏「+ 新增客户」,选择个人/家庭/企业;拖入保单、体检报告等资料,会自动进入该客户的私有知识库,AI 回答时能直接引用。",
+      action: null,
+    },
+    {
+      done: false,
+      title: "对话提问,或让助理产出文档",
+      desc: "直接输入问题(回答自动引用知识库);说「出一份保障方案书」即可生成 Word/PPT,在右侧工作区下载。",
+      action: null,
+    },
+  ];
+  return (
+    <div className="wb-onboard">
+      <div className="wb-onboard-head">
+        <span className="wb-onboard-title">
+          <Icon name="sparkles" size={14} /> 四步上手
+        </span>
+        <button className="wb-onboard-close" title="关闭引导(左侧 ? 可再次打开)" onClick={onDismiss}>
+          <Icon name="x" size={13} />
+        </button>
+      </div>
+      {steps.map((s, i) => (
+        <div key={i} className={"wb-onboard-step" + (s.done ? " done" : "")}>
+          <span className="wb-onboard-num">
+            {s.done ? <Icon name="check" size={11} strokeWidth={2.6} /> : i + 1}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="wb-onboard-step-title">{s.title}</div>
+            <div className="wb-onboard-step-desc">{s.desc}</div>
+          </div>
+          {s.action && (
+            <button className="wb-btn" onClick={s.action.onClick}>
+              {s.action.label}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

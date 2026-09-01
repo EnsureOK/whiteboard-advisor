@@ -81,6 +81,15 @@ def _plan_active(user: User) -> bool:
         return False
 
 
+def _welcome_claimed(db: OrmSession, user: User) -> bool:
+    return (
+        db.query(CreditLedger)
+        .filter(CreditLedger.user_id == user.id, CreditLedger.source == "signup_grant")
+        .first()
+        is not None
+    )
+
+
 def billing_status(db: OrmSession, user: User) -> dict:
     active = _plan_active(user)
     plan_key = user.plan if active else "free"
@@ -95,6 +104,8 @@ def billing_status(db: OrmSession, user: User) -> dict:
         "credits": bal,
         "monthConsumedCredits": credits.tokens_to_credits(credits.month_consumed_tokens(db, user)),
         "hasCredits": credits.has_credits(db, user),
+        "welcomeClaimed": _welcome_claimed(db, user),
+        "welcomeCredits": SIGNUP_GRANT_CREDITS,
     }
 
 
@@ -132,6 +143,19 @@ async def ledger(user: User = Depends(auth_svc.get_current_user), db: OrmSession
         }
         for r in rows
     ]
+
+
+@router.post("/claim-welcome")
+async def claim_welcome(user: User = Depends(auth_svc.get_current_user), db: OrmSession = Depends(get_db)) -> dict:
+    """登录后领取免费积分(一次性,幂等)。"""
+    already = _welcome_claimed(db, user)
+    if not already:
+        grant_signup_bonus(db, user)
+    return {
+        "claimed": not already,
+        "alreadyClaimed": already,
+        "status": billing_status(db, user),
+    }
 
 
 @router.post("/redeem")

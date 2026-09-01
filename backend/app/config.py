@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""
 
+    # 短信验证码(手机号登录)。未配置时验证码写数据目录 sms-outbox.log(内测)
+    sms_provider: str = ""  # "" | "aliyun"
+    sms_aliyun_ak_id: str = ""
+    sms_aliyun_ak_secret: str = ""
+    sms_sign_name: str = ""
+    sms_template_code: str = ""
+
     # 百度智能云语音 (ASR/TTS, API_KEY + SECRET_KEY -> access_token)
     baidu_speech_api_key: str = ""
     baidu_speech_secret_key: str = ""

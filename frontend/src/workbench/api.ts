@@ -209,6 +209,8 @@ export interface BillingStatus {
   credits: CreditBalance;
   monthConsumedCredits: number;
   hasCredits: boolean;
+  welcomeClaimed: boolean;
+  welcomeCredits: number;
 }
 
 export interface PlanDef {
@@ -300,8 +302,17 @@ export const api = {
       body: JSON.stringify({ clientId, kind, message }),
     }),
 
-  approveTask: (id: string) =>
-    req<TaskOut>(`/api/workbench/tasks/${id}/approve`, { method: "POST", body: JSON.stringify({}) }),
+  approveTask: (id: string, plan?: { tool: string; title: string; query?: string }[]) =>
+    req<TaskOut>(`/api/workbench/tasks/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(plan ? { plan } : {}),
+    }),
+
+  reviseTask: (id: string, instruction: string) =>
+    req<TaskOut>(`/api/workbench/tasks/${id}/revise`, {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    }),
 
   stepTask: (id: string) =>
     req<{ event: TaskEventOut; awaiting: boolean; taskStatus: string }>(
@@ -367,7 +378,25 @@ export const api = {
       body: JSON.stringify({ username, password }),
     }),
 
-  authMe: () => req<AuthUser>("/api/auth/me"),
+  authMe: () => req<{ user: AuthUser }>("/api/auth/me").then((r) => r.user),
+
+  authSmsSend: (phone: string) =>
+    req<{ sent: boolean; cooldown: number; provider: string }>("/api/auth/sms/send", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    }),
+
+  authSmsVerify: (phone: string, code: string) =>
+    req<{ token: string; user: AuthUser }>("/api/auth/sms/verify", {
+      method: "POST",
+      body: JSON.stringify({ phone, code }),
+    }),
+
+  billingClaimWelcome: () =>
+    req<{ claimed: boolean; alreadyClaimed: boolean; status: BillingStatus }>(
+      "/api/billing/claim-welcome",
+      { method: "POST" }
+    ),
 
   billingPlans: () =>
     req<{ plans: PlanDef[]; packs: PackDef[]; tokensPerCredit: number; stripe: boolean }>(
@@ -414,6 +443,8 @@ export interface ChatStreamHandlers {
   onToolStart?: (ev: ToolEvent) => void;
   /** 工具执行完,带一行结果摘要 */
   onToolEnd?: (ev: ToolEvent) => void;
+  /** plan-first:agent 生成了待确认的任务计划 */
+  onTaskCreated?: (task: TaskOut) => void;
 }
 
 /** SSE 流式对话:逐 token + 工具过程回调,结束时返回引用与工具事件。 */
@@ -453,6 +484,7 @@ export async function chatStream(
           handlers.onToolStart?.({ name: evt.name, label: evt.label, running: true });
         if (evt.type === "tool_end")
           handlers.onToolEnd?.({ name: evt.name, label: evt.label, summary: evt.summary });
+        if (evt.type === "task_created") handlers.onTaskCreated?.(evt.task);
         if (evt.type === "done") {
           citations = evt.citations || [];
           toolEvents = evt.toolEvents || [];

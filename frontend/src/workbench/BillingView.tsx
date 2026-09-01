@@ -126,6 +126,34 @@ export default function BillingView({ onToast, onAuthChange }: Props) {
               </button>
             </div>
 
+            {status && !status.welcomeClaimed && (
+              <div className="wb-claim-card">
+                <div>
+                  <div className="wb-claim-title">🎁 新用户礼:{status.welcomeCredits.toLocaleString()} 免费积分</div>
+                  <div className="wb-claim-sub">约 {(status.welcomeCredits * 2000 / 10000).toLocaleString()} 万 tokens,永不过期,点击即到账</div>
+                </div>
+                <button
+                  className="wb-btn"
+                  disabled={buying === "__welcome__"}
+                  onClick={async () => {
+                    setBuying("__welcome__");
+                    try {
+                      const r = await api.billingClaimWelcome();
+                      onToast(r.claimed ? `已领取 ${status.welcomeCredits.toLocaleString()} 积分 🎉` : "你已领取过了");
+                      await refresh();
+                    } catch (e: any) {
+                      onToast(`领取失败: ${e.message}`);
+                    } finally {
+                      setBuying(null);
+                    }
+                  }}
+                >
+                  {buying === "__welcome__" ? <Spinner size={12} /> : null}
+                  立即领取
+                </button>
+              </div>
+            )}
+
             {status && (
               <div className="wb-bill-balance">
                 <div className="wb-bill-total">
@@ -236,23 +264,60 @@ export default function BillingView({ onToast, onAuthChange }: Props) {
 }
 
 function LoginCard({ onDone, onToast }: { onDone: () => void; onToast: (m: string) => void }) {
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [phone, setPhone] = useState("");
+  const [code, setCode] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [pwMode, setPwMode] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  const submit = async () => {
-    if (!username.trim() || password.length < 8 || busy) return;
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
+
+  const phoneOk = /^1[3-9]\d{9}$/.test(phone.replace(/\s/g, ""));
+
+  const sendCode = async () => {
+    if (!phoneOk || cooldown > 0) return;
+    try {
+      const r = await api.authSmsSend(phone.replace(/\s/g, ""));
+      setCooldown(r.cooldown || 60);
+      onToast(
+        r.provider === "outbox"
+          ? "验证码已生成(内测期:请向管理员索取)"
+          : "验证码已发送,请查收短信"
+      );
+    } catch (e: any) {
+      onToast(`发送失败: ${e.message}`);
+    }
+  };
+
+  const submitSms = async () => {
+    if (!phoneOk || code.trim().length < 4 || busy) return;
     setBusy(true);
     try {
-      const r =
-        mode === "login"
-          ? await api.authLogin(username.trim(), password)
-          : await api.authRegister(username.trim(), password);
+      const r = await api.authSmsVerify(phone.replace(/\s/g, ""), code.trim());
       authToken.set(r.token);
       onDone();
     } catch (e: any) {
-      onToast(`${mode === "login" ? "登录" : "注册"}失败: ${e.message}`);
+      onToast(`登录失败: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitPw = async () => {
+    if (!username.trim() || password.length < 8 || busy) return;
+    setBusy(true);
+    try {
+      const r = await api.authLogin(username.trim(), password);
+      authToken.set(r.token);
+      onDone();
+    } catch (e: any) {
+      onToast(`登录失败: ${e.message}`);
     } finally {
       setBusy(false);
     }
@@ -260,27 +325,62 @@ function LoginCard({ onDone, onToast }: { onDone: () => void; onToast: (m: strin
 
   return (
     <div className="wb-login-card">
-      <div className="wb-seg" style={{ maxWidth: 220 }}>
-        <button className={mode === "login" ? "on" : ""} onClick={() => setMode("login")}>登录</button>
-        <button className={mode === "register" ? "on" : ""} onClick={() => setMode("register")}>注册</button>
+      <div className="wb-login-head">
+        <div className="wb-login-title">登录工作台</div>
+        <div className="wb-login-sub">首次登录自动创建账号,并可领取 2,000 免费积分</div>
       </div>
-      <input
-        className="wb-text-input"
-        placeholder="用户名(演示: demo)"
-        value={username}
-        onChange={(e) => setUsername(e.target.value)}
-      />
-      <input
-        className="wb-text-input"
-        type="password"
-        placeholder="密码,至少 8 位(演示: demo123456)"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && submit()}
-      />
-      <button className="wb-btn" disabled={busy || !username.trim() || password.length < 8} onClick={submit}>
-        {busy ? <Spinner size={12} /> : null}
-        {mode === "login" ? "登录" : "注册(赠 2,000 积分)"}
+      {!pwMode ? (
+        <>
+          <input
+            className="wb-text-input"
+            inputMode="numeric"
+            placeholder="手机号"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              className="wb-text-input"
+              style={{ flex: 1 }}
+              inputMode="numeric"
+              placeholder="短信验证码"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitSms()}
+            />
+            <button className="wb-btn ghost" disabled={!phoneOk || cooldown > 0} onClick={sendCode}>
+              {cooldown > 0 ? <span className="wb-mono">{cooldown}s</span> : "获取验证码"}
+            </button>
+          </div>
+          <button className="wb-btn" disabled={busy || !phoneOk || code.trim().length < 4} onClick={submitSms}>
+            {busy ? <Spinner size={12} /> : null}
+            登录 / 注册
+          </button>
+        </>
+      ) : (
+        <>
+          <input
+            className="wb-text-input"
+            placeholder="用户名"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+          />
+          <input
+            className="wb-text-input"
+            type="password"
+            placeholder="密码"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submitPw()}
+          />
+          <button className="wb-btn" disabled={busy || !username.trim() || password.length < 8} onClick={submitPw}>
+            {busy ? <Spinner size={12} /> : null}
+            登录
+          </button>
+        </>
+      )}
+      <button className="wb-login-switch" onClick={() => setPwMode(!pwMode)}>
+        {pwMode ? "← 使用手机号登录" : "使用账号密码登录"}
       </button>
     </div>
   );
