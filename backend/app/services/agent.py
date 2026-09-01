@@ -46,6 +46,8 @@ TOOL_LABELS = {
     "list_policies": "调取托管保单",
     "calc_coverage_gaps": "计算保障缺口",
     "create_task_plan": "制定任务计划",
+    "web_search": "联网搜索",
+    "remember": "记入长期记忆",
 }
 
 
@@ -68,6 +70,8 @@ class AgentDeps:
 
     db: OrmSession
     client: Client
+    # 当前登录经纪人(broker 记忆归属);未登录为 None
+    user_id: Optional[str] = None
     citations: list[dict] = field(default_factory=list)
     # 工具过程记录(持久化+SSE 摘要): {"name","label","summary"}
     tool_events: list[dict] = field(default_factory=list)
@@ -91,11 +95,40 @@ def _client_brief(c: Client) -> str:
     )
 
 
-def _build_instructions(client: Client) -> str:
+def _memories_block(db: OrmSession, client: Client, user_id: Optional[str]) -> str:
+    """最近的长期记忆(broker 偏好 + 该客户事实),注入 instructions。"""
+    from app.db_models import AgentMemory
+
+    lines = []
+    if user_id:
+        rows = (
+            db.query(AgentMemory)
+            .filter(AgentMemory.scope == "broker", AgentMemory.user_id == user_id)
+            .order_by(AgentMemory.created_at.desc())
+            .limit(10)
+            .all()
+        )
+        lines += [f"- (经纪人偏好) {r.content}" for r in reversed(rows)]
+    rows = (
+        db.query(AgentMemory)
+        .filter(AgentMemory.scope == "client", AgentMemory.client_id == client.id)
+        .order_by(AgentMemory.created_at.desc())
+        .limit(10)
+        .all()
+    )
+    lines += [f"- (客户事实) {r.content}" for r in reversed(rows)]
+    if not lines:
+        return ""
+    return "\n\n## 长期记忆(此前记住的)\n" + "\n".join(lines)
+
+
+def _build_instructions(deps: "AgentDeps") -> str:
+    client = deps.client
     return (
         load_soul()
         + "\n\n## 当前上下文\n"
         + _client_brief(client)
+        + _memories_block(deps.db, client, deps.user_id)
         + "\n\n## 工具使用\n"
         "- 回答涉及保单、保障、客户情况时,先调用相应工具获取事实。\n"
         "- 需要条款、核保规则、理赔材料等资料时,必须真正调用 search_knowledge,拿到结果再回答。\n"
@@ -106,7 +139,12 @@ def _build_instructions(client: Client) -> str:
         "- 经纪人布置任务时(检视保单、生成方案书、准备面谈、写跟进、出文档、或其他多步骤工作),"
         "必须调用 create_task_plan 产出执行计划,由经纪人确认(可调整)后再执行——不要自己直接完成任务或生成文档。\n"
         "- 调用 create_task_plan 之后,只用一两句话告知计划已生成、等确认,不要展开执行细节。\n"
-        "- 简单的信息问答(查某张保单、查条款、解释概念)不需要建任务,直接回答。"
+        "- 简单的信息问答(查某张保单、查条款、解释概念)不需要建任务,直接回答。\n"
+        "\n## 记忆与联网\n"
+        "- 对话中出现值得长期记住的信息时调用 remember:经纪人的偏好/习惯(scope=broker,如'方案书预算默认按年收入10%'),"
+        "客户的关键事实(scope=client,如'李娜有甲状腺结节 TI-RADS 2 类')。同一事实不要重复记。\n"
+        "- 内部知识库查不到、或需要最新市场信息(产品停售、费率调整、保司公告、监管新规)时,调用 web_search;"
+        "引用网络结果时给出来源标题或链接,并提醒以官方原文为准。"
     )
 
 
@@ -275,13 +313,78 @@ def build_agent():
         )
         return "计划已生成并展示给经纪人确认(可手动调整或让你修改),不要继续执行,回复一句话说明即可。"
 
+    @function_tool
+    async def web_search(ctx: RunContextWrapper[AgentDeps], query: str) -> str:
+        """联网搜索最新信息(产品动态、费率调整、保司公告、监管新规等)。
+
+        Args:
+            query: 搜索关键词。
+        """
+        from app.services import websearch
+
+        deps = ctx.context
+        results = await websearch.search(query, count=5)
+        deps.tool_events.append(
+            {
+                "name": "web_search",
+                "label": TOOL_LABELS["web_search"],
+                "summary": f"“{query[:20]}” {len(results)} 条结果" if results else "搜索暂不可用",
+            }
+        )
+        if not results:
+            return "联网搜索暂不可用(网络或服务未配置),请基于已有知识回答并说明信息可能不是最新。"
+        lines = []
+        for i, r in enumerate(results, 1):
+            lines.append(f"[W{i}] {r['title']}\n{r['url']}\n{r['snippet']}")
+        return "\n\n".join(lines)
+
+    @function_tool
+    def remember(ctx: RunContextWrapper[AgentDeps], content: str, scope: str) -> str:
+        """把值得长期记住的信息写入记忆,跨会话生效。
+
+        Args:
+            content: 要记住的一句话事实或偏好,精炼完整。
+            scope: broker=经纪人本人的偏好/习惯 / client=当前客户的关键事实。
+        """
+        from app.db_models import AgentMemory
+
+        deps = ctx.context
+        scope = scope if scope in ("broker", "client") else "client"
+        if scope == "broker" and not deps.user_id:
+            return "经纪人未登录,broker 级偏好暂不记录;客户事实可用 scope=client 记。"
+        deps.db.add(
+            AgentMemory(
+                user_id=deps.user_id if scope == "broker" else None,
+                client_id=deps.client.id if scope == "client" else None,
+                scope=scope,
+                content=content.strip()[:500],
+            )
+        )
+        deps.db.commit()
+        deps.tool_events.append(
+            {
+                "name": "remember",
+                "label": TOOL_LABELS["remember"],
+                "summary": ("偏好:" if scope == "broker" else "客户:") + content.strip()[:24],
+            }
+        )
+        return "已记住。"
+
     from agents import Agent as _Agent
 
     return _Agent(
         name="broker-assistant",
-        instructions=lambda ctx, agent: _build_instructions(ctx.context.client),
+        instructions=lambda ctx, agent: _build_instructions(ctx.context),
         model=model,
-        tools=[search_knowledge, get_client_profile, list_policies, calc_coverage_gaps, create_task_plan],
+        tools=[
+            search_knowledge,
+            get_client_profile,
+            list_policies,
+            calc_coverage_gaps,
+            create_task_plan,
+            web_search,
+            remember,
+        ],
     )
 
 
@@ -290,6 +393,7 @@ async def run_agent_stream(
     client: Client,
     history: list[dict],
     message: str,
+    user_id: Optional[str] = None,
 ) -> AsyncIterator[dict]:
     """跑 agent loop,产出 SSE 友好的事件字典流。
 
@@ -299,7 +403,7 @@ async def run_agent_stream(
     """
     from agents import Runner
 
-    deps = AgentDeps(db=db, client=client)
+    deps = AgentDeps(db=db, client=client, user_id=user_id)
     agent = build_agent()
 
     input_items: list[Any] = []

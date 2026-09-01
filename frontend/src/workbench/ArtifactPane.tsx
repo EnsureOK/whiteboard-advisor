@@ -9,6 +9,8 @@ interface Props {
   running: boolean;
   /** 窄视口抽屉态是否展开 */
   open?: boolean;
+  /** 文档类工件按意见出新版本 */
+  onRevise?: (artifactId: string, instruction: string) => Promise<void>;
 }
 
 const TYPE_ICON: Record<string, IconName> = {
@@ -35,7 +37,7 @@ const TYPE_EXPORTS: Record<string, { fmt: string; label: string }[]> = {
 };
 
 /** 右栏:工作区(工件列表 + 保单检视矩阵视图 + 导出) */
-export default function ArtifactPane({ artifacts, running, open }: Props) {
+export default function ArtifactPane({ artifacts, running, open, onRevise }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const active = artifacts.find((a) => a.id === activeId) || artifacts[0] || null;
 
@@ -68,12 +70,20 @@ export default function ArtifactPane({ artifacts, running, open }: Props) {
         ))}
       </div>
 
-      {active && <ArtifactView artifact={active} />}
+      {active && <ArtifactView artifact={active} onRevise={onRevise} />}
     </aside>
   );
 }
 
-function ArtifactView({ artifact }: { artifact: ArtifactOut }) {
+function ArtifactView({
+  artifact,
+  onRevise,
+}: {
+  artifact: ArtifactOut;
+  onRevise?: (artifactId: string, instruction: string) => Promise<void>;
+}) {
+  const [reviseText, setReviseText] = useState("");
+  const [revising, setRevising] = useState(false);
   const content = artifact.content || {};
   const isMatrix = content.kind === "review_matrix";
   const isDoc = content.kind === "doc";
@@ -160,6 +170,37 @@ function ArtifactView({ artifact }: { artifact: ArtifactOut }) {
           <pre style={{ whiteSpace: "pre-wrap", fontSize: 12.5 }}>{exportText}</pre>
         )}
       </div>
+      {isDoc && onRevise && (
+        <div className="wb-artifact-revise">
+          <input
+            className="wb-text-input"
+            placeholder="告诉 AI 怎么改这份文档,出新版本…"
+            value={reviseText}
+            onChange={(e) => setReviseText(e.target.value)}
+            onKeyDown={async (e) => {
+              if (e.key === "Enter" && reviseText.trim() && !revising) {
+                setRevising(true);
+                await onRevise(artifact.id, reviseText.trim());
+                setReviseText("");
+                setRevising(false);
+              }
+            }}
+          />
+          <button
+            className="wb-btn ghost"
+            disabled={!reviseText.trim() || revising}
+            onClick={async () => {
+              setRevising(true);
+              await onRevise(artifact.id, reviseText.trim());
+              setReviseText("");
+              setRevising(false);
+            }}
+          >
+            {revising ? <Spinner size={12} /> : null}
+            修改
+          </button>
+        </div>
+      )}
       <div className="wb-artifact-actions">
         {(TYPE_EXPORTS[artifact.type] || []).map((e) => (
           <button

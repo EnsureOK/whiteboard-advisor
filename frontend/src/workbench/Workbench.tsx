@@ -89,8 +89,35 @@ export default function Workbench() {
   }, [activeId]);
 
   // ---------- 对话 ----------
-  const handleSend = async (text: string) => {
+  const handleSend = async (text: string, files: File[] = []) => {
     if (!client || streaming) return;
+
+    // 附件先入该客户私有知识库(文档等待解析≤6s),消息里注明
+    if (files.length > 0) {
+      setStreaming(true);
+      try {
+        const uploaded = await api.uploadClientFiles(client.id, files);
+        const docIds = uploaded.filter((u) => u.kbDocId).map((u) => u.kbDocId!);
+        const deadline = Date.now() + 6000;
+        let indexed = docIds.length === 0;
+        while (!indexed && Date.now() < deadline) {
+          const docs = await Promise.all(docIds.map((id) => api.kbDocument(id).catch(() => null)));
+          indexed = docs.every((d) => d && d.status === "indexed");
+          if (!indexed) await new Promise((r) => setTimeout(r, 900));
+        }
+        const names = uploaded.map((u) => u.filename).join("、");
+        text =
+          `(刚上传了资料:${names};文档已入本客户私有知识库${indexed ? "并完成解析" : ",正在解析中"},图片已存档)\n` +
+          text;
+      } catch (e: any) {
+        showToast(`附件上传失败: ${e.message}`);
+        setStreaming(false);
+        return;
+      } finally {
+        setStreaming(false);
+      }
+    }
+
     const localUser: MessageOut = {
       id: `local-${Date.now()}`,
       clientId: client.id,
@@ -378,7 +405,20 @@ export default function Workbench() {
               onGoBilling: () => setView("billing"),
             }}
           />
-          <ArtifactPane artifacts={artifacts} running={running} open={rightOpen} />
+          <ArtifactPane
+            artifacts={artifacts}
+            running={running}
+            open={rightOpen}
+            onRevise={async (id, instruction) => {
+              try {
+                await api.reviseArtifact(id, instruction);
+                await refreshArtifacts();
+                showToast("已按你的意见出新版本");
+              } catch (e: any) {
+                showToast(`修改失败: ${e.message}`);
+              }
+            }}
+          />
         </>
       ) : (
         <div className="wb-empty" style={{ flex: 1, alignSelf: "center" }}>左侧选择或新建一个客户开始。</div>

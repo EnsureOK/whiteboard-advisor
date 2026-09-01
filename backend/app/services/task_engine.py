@@ -475,6 +475,45 @@ def _template_sections(db: OrmSession, client: Client, kind: str) -> dict:
     }
 
 
+async def revise_doc(db: OrmSession, client: Client, old_content: dict, instruction: str) -> Optional[dict]:
+    """按修改意见迭代文档工件内容;LLM 不可用返回 None。"""
+    from app.config import settings
+
+    if not settings.has_llm:
+        return None
+    try:
+        from app.services.agent import load_soul
+        from app.services.llm import _call_qianfan
+
+        prompt = (
+            f"{load_soul()}\n\n"
+            f"任务: 按经纪人的修改意见调整这份文档。\n"
+            f"客户: {client.name}\n"
+            f"现有文档: {json.dumps({'summary': old_content.get('summary', ''), 'sections': old_content.get('sections', [])}, ensure_ascii=False)}\n"
+            f"修改意见: {instruction}\n"
+            '只输出 JSON,格式: {"summary": "一句话摘要", "sections": [{"heading": "小节标题", "body": "正文,要点用 - 开头分行"}]}\n'
+            "未被意见涉及的部分尽量保留原文;不得编造数字。"
+        )
+        raw, _usage = await _call_qianfan([{"role": "user", "content": prompt}], settings.model_deep)
+        start, end = raw.find("{"), raw.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        data = json.loads(raw[start : end + 1])
+        sections = data.get("sections")
+        if not isinstance(sections, list) or not sections:
+            return None
+        return {
+            "summary": str(data.get("summary", ""))[:300],
+            "sections": [
+                {"heading": str(s.get("heading", ""))[:80], "body": str(s.get("body", ""))[:2000]}
+                for s in sections[:8]
+            ],
+        }
+    except Exception as e:  # noqa: BLE001
+        logger.warning("revise doc failed: %s", e)
+        return None
+
+
 async def compose_doc(db: OrmSession, client: Client, kind: str) -> tuple[str, str, dict]:
     """产出文档类工件内容: (artifact_type, title, content)。"""
     doc_type, doc_name, _goal = _DOC_SPECS.get(kind, _DOC_SPECS["followup"])

@@ -521,7 +521,7 @@ async def chat(
                 buffer: list[str] = []
                 usage_tokens = 0
                 try:
-                    async for ev in run_agent_stream(db2, c2, history, message):
+                    async for ev in run_agent_stream(db2, c2, history, message, user_id=user_id):
                         if ev["type"] == "delta":
                             buffer.append(ev["text"])
                             yield _sse({"type": "delta", "text": ev["text"]})
@@ -788,6 +788,34 @@ async def export_artifact(artifact_id: str, fmt: str, db: OrmSession = Depends(g
         media_type=office.MEDIA_TYPES[fmt],
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
+
+
+@router.post("/artifacts/{artifact_id}/revise")
+async def revise_artifact(artifact_id: str, body: ReviseBody, db: OrmSession = Depends(get_db)) -> dict:
+    """按修改意见迭代文档类工件,产出新版本(v+1)。"""
+    a = db.get(Artifact, kb.check_id(artifact_id, "artifact id"))
+    if not a:
+        raise HTTPException(404, "artifact not found")
+    content = json.loads(a.content_json or "{}")
+    if content.get("kind") != "doc":
+        raise HTTPException(400, "只有文档类工件(方案书/提纲/跟进)支持修改;矩阵请重新发起检视")
+    instruction = body.instruction.strip()
+    if not instruction:
+        raise HTTPException(400, "请描述要怎么改")
+    c = _get_client_or_404(db, a.client_id)
+    draft = await task_engine.revise_doc(db, c, content, instruction)
+    if draft is None:
+        raise HTTPException(503, "AI 修改暂不可用(未配置模型)")
+    new_content = {
+        **content,
+        "summary": draft["summary"],
+        "sections": draft["sections"],
+        "generatedAt": task_engine.utcnow_iso(),
+    }
+    new_artifact = task_engine._save_artifact(  # noqa: SLF001 复用版本管理
+        db, c, a.task_id, a.type, a.title, new_content
+    )
+    return store.artifact_out(new_artifact)
 
 
 @router.get("/artifacts")

@@ -363,6 +363,22 @@ class Order(Base):
     paid_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
 
+class AgentMemory(Base):
+    """agent 持久记忆:经纪人偏好(user 级)与客户关键事实(client 级),跨会话注入。"""
+
+    __tablename__ = "agent_memories"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    # broker 记忆归属的用户;未登录会话不写 broker 记忆
+    user_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    # client 记忆归属的客户;broker 级记忆此列为空
+    client_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    # broker / client
+    scope: Mapped[str] = mapped_column(String(10), index=True)
+    content: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
+
+
 class SmsCode(Base):
     """手机验证码(登录):5 分钟有效,同号 60s 冷却,错 5 次作废。"""
 

@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""
 
+    # 联网搜索(agent 工具):配博查 key 生产可用;未配置走 DuckDuckGo 兜底
+    bocha_api_key: str = ""
+
     # 短信验证码(手机号登录)。未配置时验证码写数据目录 sms-outbox.log(内测)
     sms_provider: str = ""  # "" | "aliyun"
     sms_aliyun_ak_id: str = ""

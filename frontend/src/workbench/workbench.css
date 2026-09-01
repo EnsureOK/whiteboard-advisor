@@ -658,6 +658,19 @@
 }
 .wb-input::placeholder { color: var(--w-faint); }
 .wb-cbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wb-attach {
+  border: none;
+  background: none;
+  color: var(--w-faint);
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-attach:hover:not(:disabled) { color: var(--w-ink); background: var(--w-hover); }
+.wb-attach:disabled { opacity: 0.45; }
 .wb-chip {
   border: 1px solid var(--w-line);
   background: var(--w-surface);
@@ -801,7 +814,10 @@
 .wb-doc-body { font-size: 12.5px; color: var(--w-ink); white-space: pre-wrap; line-height: 1.65; }
 .wb-extras { margin-top: 12px; font-size: 11.5px; color: var(--w-muted); line-height: 1.7; }
 .wb-extras b { color: var(--w-ink); font-weight: 550; }
+.wb-artifact-revise { display: flex; gap: 8px; padding: 10px 14px 0; border-top: 1px solid var(--w-line); background: var(--w-surface); }
+.wb-artifact-revise .wb-text-input { flex: 1; }
 .wb-artifact-actions { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--w-line); background: var(--w-surface); }
+.wb-artifact-revise + .wb-artifact-actions { border-top: none; }
 .wb-empty { color: var(--w-muted); font-size: 12.5px; text-align: center; padding: 28px 16px; line-height: 1.8; }
 
 /* ---------- 知识库视图 ---------- */

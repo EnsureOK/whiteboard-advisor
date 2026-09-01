@@ -11,7 +11,7 @@ interface Props {
   running: boolean;
   streaming: boolean;
   llmAvailable: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, files: File[]) => void;
   onQuickCommand: (label: string) => void;
   onApprovePlan: (plan?: { tool: string; title: string; query?: string }[]) => void;
   onRevisePlan: (instruction: string) => Promise<void> | void;
@@ -43,6 +43,8 @@ export default function ChatPane({
   onSend, onQuickCommand, onApprovePlan, onRevisePlan, onConfirmApproval, onToggleRight, onboarding,
 }: Props) {
   const [text, setText] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const attachRef = useRef<HTMLInputElement>(null);
   const [expandedCite, setExpandedCite] = useState<string | null>(null);
   const [editingPlan, setEditingPlan] = useState(false);
   const [draftPlan, setDraftPlan] = useState<{ tool: string; title: string; query?: string }[]>([]);
@@ -64,9 +66,10 @@ export default function ChatPane({
 
   const submit = () => {
     const t = text.trim();
-    if (!t || running) return;
-    onSend(t);
+    if ((!t && pendingFiles.length === 0) || running) return;
+    onSend(t || "请看我刚上传的资料。", pendingFiles);
     setText("");
+    setPendingFiles([]);
     if (inputRef.current) inputRef.current.style.height = "auto";
   };
 
@@ -381,6 +384,19 @@ export default function ChatPane({
       <div className="wb-composer">
         <div className="wb-composer-inner">
           <div className="wb-cbox">
+            {pendingFiles.length > 0 && (
+              <div className="wb-file-pills" style={{ marginBottom: 6 }}>
+                {pendingFiles.map((f, i) => (
+                  <span key={`${f.name}-${i}`} className="wb-file-pill">
+                    <Icon name={f.type.startsWith("image/") ? "image" : "fileText"} size={11} />
+                    <span>{f.name}</span>
+                    <button title="移除" onClick={() => setPendingFiles(pendingFiles.filter((_, j) => j !== i))}>
+                      <Icon name="x" size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <textarea
               ref={inputRef}
               className="wb-input"
@@ -396,6 +412,25 @@ export default function ChatPane({
               }}
             />
             <div className="wb-cbar">
+              <button
+                className="wb-attach"
+                title="附件:体检报告/保单等,自动入该客户私有知识库"
+                disabled={running}
+                onClick={() => attachRef.current?.click()}
+              >
+                <Icon name="paperclip" size={14} />
+              </button>
+              <input
+                ref={attachRef}
+                type="file"
+                multiple
+                accept=".pdf,.docx,.txt,.md,.html,.htm,.png,.jpg,.jpeg,.webp,.gif,.heic"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  if (e.target.files) setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+                  e.target.value = "";
+                }}
+              />
               {QUICK_COMMANDS.map((label) => (
                 <button key={label} className="wb-chip" disabled={running} onClick={() => onQuickCommand(label)}>
                   {label}
@@ -404,7 +439,7 @@ export default function ChatPane({
               <button
                 className="wb-send"
                 title="发送(⏎)"
-                disabled={!text.trim() || running}
+                disabled={(!text.trim() && pendingFiles.length === 0) || running}
                 onClick={submit}
               >
                 {streaming ? <Spinner size={13} /> : <Icon name="arrowUp" size={14} strokeWidth={2.4} />}

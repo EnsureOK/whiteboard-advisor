@@ -314,6 +314,12 @@ export const api = {
       body: JSON.stringify({ instruction }),
     }),
 
+  reviseArtifact: (id: string, instruction: string) =>
+    req<ArtifactOut>(`/api/workbench/artifacts/${id}/revise`, {
+      method: "POST",
+      body: JSON.stringify({ instruction }),
+    }),
+
   stepTask: (id: string) =>
     req<{ event: TaskEventOut; awaiting: boolean; taskStatus: string }>(
       `/api/workbench/tasks/${id}/step`,
