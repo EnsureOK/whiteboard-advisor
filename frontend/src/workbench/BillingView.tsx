@@ -20,6 +20,21 @@ const SOURCE_LABEL: Record<string, string> = {
   consume: "消耗",
 };
 
+/** 扣费流水 ref -> 人话(task:{id} 这类带随机 id 的归并为统一说法) */
+function refLabel(ref: string): string {
+  const FIXED: Record<string, string> = {
+    "chat:agent": "智能对话",
+    "chat:rag": "对话(检索)",
+    "task:plan": "任务·起草计划",
+    "task:plan-batch": "批量任务·起草计划",
+    "task:revise-plan": "任务·AI 调整计划",
+    "artifact:revise": "文档修订",
+  };
+  if (FIXED[ref]) return FIXED[ref];
+  if (/^task:[0-9a-f]{8,}$/i.test(ref)) return "任务执行";
+  return ref;
+}
+
 /** 计费视图:登录 / 余额 / 套餐与积分包 / 兑换码 / 订单流水 */
 export default function BillingView({ onToast, onAuthChange }: Props) {
   const [me, setMe] = useState<AuthUser | null>(null);
@@ -251,7 +266,7 @@ export default function BillingView({ onToast, onAuthChange }: Props) {
                     {r.deltaCredits.toLocaleString()}
                   </span>
                   <span>{SOURCE_LABEL[r.source] || r.source}</span>
-                  <span className="wb-ledger-ref">{r.ref}</span>
+                  <span className="wb-ledger-ref" title={r.ref}>{refLabel(r.ref)}</span>
                   <span className="wb-ledger-time wb-mono">{r.createdAt.slice(5, 16).replace("T", " ")}</span>
                 </div>
               ))}
