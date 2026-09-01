@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # 联网搜索(agent 工具):配博查 key 生产可用;未配置走 DuckDuckGo 兜底
     bocha_api_key: str = ""
 
+    # 企微群机器人 webhook(每日简报/通知推送;群里添加机器人即得地址)
+    wecom_webhook_url: str = ""
+
     # 短信验证码(手机号登录)。未配置时验证码写数据目录 sms-outbox.log(内测)
     sms_provider: str = ""  # "" | "aliyun"
     sms_aliyun_ak_id: str = ""

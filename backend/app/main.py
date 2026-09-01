@@ -30,6 +30,17 @@ app.add_middleware(
 
 init_db()
 
+
+@app.on_event("startup")
+async def _start_scheduler() -> None:
+    """内建定时作业(到期扫描/每日简报);WB_DISABLE_SCHEDULER=1 关闭(测试)。"""
+    import asyncio
+
+    from app.services import scheduler
+
+    if scheduler.enabled():
+        asyncio.get_running_loop().create_task(scheduler.scheduler_loop())
+
 app.include_router(session_router)
 app.include_router(broker_router)
 app.include_router(workbench_router)

@@ -37,6 +37,7 @@ export default function Workbench() {
   const [showOnboarding, setShowOnboarding] = useState(
     () => !localStorage.getItem("wb_onboarding_dismissed")
   );
+  const [briefing, setBriefing] = useState<{ date: string; content: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const client = clients.find((c) => c.id === activeId) || null;
@@ -61,6 +62,11 @@ export default function Workbench() {
     if (authToken.get()) {
       api.billingStatus().then(setBilling).catch(() => authToken.clear());
     }
+    // 今日简报(未生成则静默)
+    fetch("/api/workbench/briefing/today")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((b) => b && setBriefing(b))
+      .catch(() => {});
     // 从 Stripe Checkout 回跳
     const pay = new URLSearchParams(location.search).get("pay");
     if (pay === "success") showToast("支付成功,权益到账中(异步支付以回调为准)");
@@ -376,6 +382,7 @@ export default function Workbench() {
             todos={todos}
             activeId={activeId}
             creating={creating}
+            briefing={briefing}
             onSelect={setActiveId}
             onCreate={handleCreateClient}
             onOpenTodo={(t) => t.clientId && setActiveId(t.clientId)}

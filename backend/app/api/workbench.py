@@ -835,6 +835,32 @@ async def list_artifacts(clientId: str, db: OrmSession = Depends(get_db)) -> lis
     return [store.artifact_out(a) for a in latest.values()]
 
 
+# ---------- 每日简报 ----------
+
+@router.get("/briefing/today")
+async def briefing_today(db: OrmSession = Depends(get_db)) -> dict:
+    from datetime import date as _date
+
+    from app.db_models import DailyBriefing
+
+    row = db.query(DailyBriefing).filter(DailyBriefing.date == _date.today().isoformat()).first()
+    if not row:
+        raise HTTPException(404, "今日简报尚未生成")
+    return {"date": row.date, "content": row.content}
+
+
+@router.post("/briefing/generate")
+async def briefing_generate(db: OrmSession = Depends(get_db)) -> dict:
+    """手动生成/刷新今日简报(也会推企微,若配置)。"""
+    from app.services import scheduler
+
+    scheduler.scan_expiring(db)
+    content = await scheduler.generate_briefing(db)
+    from datetime import date as _date
+
+    return {"date": _date.today().isoformat(), "content": content}
+
+
 # ---------- Todos ----------
 
 @router.patch("/todos/{todo_id}")

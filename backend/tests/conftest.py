@@ -1,3 +1,8 @@
+import os
+
+# 测试环境不启动内建定时循环(它使用真实 SessionLocal,会写开发库)
+os.environ.setdefault("WB_DISABLE_SCHEDULER", "1")
+
 import pytest
 
 from app.models.schemas import Language, Session, SessionState

@@ -363,6 +363,32 @@ class Order(Base):
     paid_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
 
+class DailyBriefing(Base):
+    """每日简报:调度器汇总到期保单/理赔/待办,LLM 成文(或模板)。"""
+
+    __tablename__ = "daily_briefings"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    # 本地日期 YYYY-MM-DD,唯一
+    date: Mapped[str] = mapped_column(String(10), unique=True, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
+
+
+class SchedulerRun(Base):
+    """定时作业执行记录(按日幂等)。"""
+
+    __tablename__ = "scheduler_runs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    job: Mapped[str] = mapped_column(String(40), index=True)
+    run_date: Mapped[str] = mapped_column(String(10), index=True)
+    detail: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
+
+    __table_args__ = (Index("ix_scheduler_job_date", "job", "run_date", unique=True),)
+
+
 class AgentMemory(Base):
     """agent 持久记忆:经纪人偏好(user 级)与客户关键事实(client 级),跨会话注入。"""
 

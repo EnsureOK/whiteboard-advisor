@@ -178,6 +178,38 @@
 }
 .wb-section-action:hover { background: var(--w-hover); color: var(--w-ink); }
 
+/* 今日简报 */
+.wb-brief {
+  margin: 0 10px 8px;
+  background: var(--w-surface);
+  border: 1px solid var(--w-line);
+  border-radius: 10px;
+  box-shadow: var(--w-shadow-card);
+  overflow: hidden;
+}
+.wb-brief-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 11px;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--w-ink);
+  text-align: left;
+}
+.wb-brief-head svg:first-child { color: var(--w-muted); }
+.wb-brief-body {
+  padding: 0 12px 10px;
+  font-size: 12px;
+  color: var(--w-ink);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.wb-brief-body strong { font-weight: 650; }
+
 .wb-todos { padding-bottom: 6px; }
 .wb-todo {
   display: flex;

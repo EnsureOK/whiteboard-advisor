@@ -2,12 +2,14 @@ import { useRef, useState } from "react";
 import type { Client, ClientType, Engagement, Todo } from "./api";
 import { Icon, Spinner } from "./icons";
 import type { IconName } from "./icons";
+import { Markdown } from "./markdown";
 
 interface Props {
   clients: Client[];
   todos: Todo[];
   activeId: string | null;
   creating: boolean;
+  briefing: { date: string; content: string } | null;
   onSelect: (id: string) => void;
   onCreate: (name: string, type: ClientType, files: File[]) => void;
   onOpenTodo: (todo: Todo) => void;
@@ -43,10 +45,13 @@ function memberBadgeTone(badge: string): string {
 
 /** 左栏:今日待办 + 客户列表(个人/家庭/企业,托管保单与进行中事项聚合) */
 export default function ClientPane({
-  clients, todos, activeId, creating, onSelect, onCreate, onOpenTodo, onToggleTodo,
+  clients, todos, activeId, creating, briefing, onSelect, onCreate, onOpenTodo, onToggleTodo,
 }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set(clients.slice(0, 1).map((c) => c.id)));
   const [adding, setAdding] = useState(false);
+  const [briefOpen, setBriefOpen] = useState(
+    () => briefing !== null && localStorage.getItem("wb_brief_closed") !== briefing?.date
+  );
 
   const toggle = (id: string) => {
     const next = new Set(expanded);
@@ -57,6 +62,24 @@ export default function ClientPane({
 
   return (
     <aside className="wb-side">
+      {briefing && (
+        <div className="wb-brief">
+          <button className="wb-brief-head" onClick={() => {
+            const next = !briefOpen;
+            setBriefOpen(next);
+            if (!next) localStorage.setItem("wb_brief_closed", briefing.date);
+            else localStorage.removeItem("wb_brief_closed");
+          }}>
+            <Icon name="sparkles" size={12} />
+            <span>今日简报</span>
+            <span className="wb-count wb-mono">{briefing.date.slice(5)}</span>
+            <span className={"wb-client-caret" + (briefOpen ? " open" : "")} style={{ marginLeft: "auto" }}>
+              <Icon name="chevronRight" size={11} strokeWidth={2.2} />
+            </span>
+          </button>
+          {briefOpen && <Markdown className="wb-brief-body" text={briefing.content} />}
+        </div>
+      )}
       <div className="wb-section">
         今日待办 <span className="wb-count">{todos.length}</span>
       </div>
