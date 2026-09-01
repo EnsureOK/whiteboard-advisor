@@ -515,6 +515,9 @@
   transition: border-color 0.13s ease, color 0.13s ease;
 }
 .wb-cite:hover, .wb-cite.open { border-color: var(--w-ink); color: var(--w-ink); }
+.wb-cite.web { display: inline-flex; align-items: center; gap: 4px; }
+.wb-cite.web svg { flex-shrink: 0; color: var(--w-faint); }
+.wb-cite.web:hover svg { color: var(--w-ink); }
 .wb-cite-pop {
   border: 1px solid var(--w-line);
   border-left: 2px solid var(--w-ink);

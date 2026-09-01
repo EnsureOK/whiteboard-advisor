@@ -117,24 +117,45 @@ export default function ChatPane({
       )}
       {m.role === "assistant" && m.citations.length > 0 && (
         <div className="wb-cites">
-          {m.citations.map((c, i) => (
-            <React.Fragment key={c.chunkId}>
-              <button
-                className={"wb-cite" + (expandedCite === c.chunkId ? " open" : "")}
-                title={`${c.docTitle} · 相关度 ${c.score.toFixed(2)}`}
-                onClick={() => setExpandedCite(expandedCite === c.chunkId ? null : c.chunkId)}
-              >
-                [{i + 1}] {c.docTitle}
-              </button>
-              {expandedCite === c.chunkId && (
-                <div className="wb-cite-pop">
-                  {c.text}
-                  {"\n"}
-                  <span className="src">《{c.docTitle}》 · score {c.score.toFixed(2)}</span>
-                </div>
-              )}
-            </React.Fragment>
-          ))}
+          {(() => {
+            let kbIdx = 0;
+            let webIdx = 0;
+            return m.citations.map((c) => {
+              const isWeb = c.scope === "web";
+              const label = isWeb ? `W${++webIdx}` : `${++kbIdx}`;
+              if (isWeb) {
+                // 联网来源:点击新窗打开真实原文(URL 在 title 可预览)
+                return (
+                  <button
+                    key={c.chunkId}
+                    className="wb-cite web"
+                    title={c.url || c.docTitle}
+                    onClick={() => c.url && window.open(c.url, "_blank", "noopener")}
+                  >
+                    <Icon name="globe" size={10} /> [{label}] {c.docTitle}
+                  </button>
+                );
+              }
+              return (
+                <React.Fragment key={c.chunkId}>
+                  <button
+                    className={"wb-cite" + (expandedCite === c.chunkId ? " open" : "")}
+                    title={`${c.docTitle} · 相关度 ${c.score.toFixed(2)}`}
+                    onClick={() => setExpandedCite(expandedCite === c.chunkId ? null : c.chunkId)}
+                  >
+                    [{label}] {c.docTitle}
+                  </button>
+                  {expandedCite === c.chunkId && (
+                    <div className="wb-cite-pop">
+                      {c.text}
+                      {"\n"}
+                      <span className="src">《{c.docTitle}》 · score {c.score.toFixed(2)}</span>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            });
+          })()}
         </div>
       )}
     </div>

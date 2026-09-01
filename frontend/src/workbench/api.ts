@@ -82,6 +82,8 @@ export interface Citation {
   scope: string;
   text: string;
   score: number;
+  /** scope=web 时的真实来源链接(新窗打开) */
+  url?: string;
 }
 
 export interface TaskEventOut {

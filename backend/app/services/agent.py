@@ -144,7 +144,8 @@ def _build_instructions(deps: "AgentDeps") -> str:
         "- 对话中出现值得长期记住的信息时调用 remember:经纪人的偏好/习惯(scope=broker,如'方案书预算默认按年收入10%'),"
         "客户的关键事实(scope=client,如'李娜有甲状腺结节 TI-RADS 2 类')。同一事实不要重复记。\n"
         "- 内部知识库查不到、或需要最新市场信息(产品停售、费率调整、保司公告、监管新规)时,调用 web_search;"
-        "引用网络结果时给出来源标题或链接,并提醒以官方原文为准。"
+        "引用网络结果只在句末标注 [Wn],绝不在正文里写 URL 或 markdown 链接(真实来源链接由系统渲染展示),"
+        "并提醒以官方原文为准。"
     )
 
 
@@ -320,6 +321,8 @@ def build_agent():
         Args:
             query: 搜索关键词。
         """
+        from urllib.parse import urlparse
+
         from app.services import websearch
 
         deps = ctx.context
@@ -333,10 +336,28 @@ def build_agent():
         )
         if not results:
             return "联网搜索暂不可用(网络或服务未配置),请基于已有知识回答并说明信息可能不是最新。"
+        # 结构化引用:真实 URL 由前端角标展示(scope=web),正文只标 [Wn]
         lines = []
-        for i, r in enumerate(results, 1):
-            lines.append(f"[W{i}] {r['title']}\n{r['url']}\n{r['snippet']}")
-        return "\n\n".join(lines)
+        for r in results:
+            idx = len([c for c in deps.citations if c.get("scope") == "web"]) + 1
+            deps.citations.append(
+                {
+                    "chunkId": f"web-{idx}-{abs(hash(r['url'])) % 99999}",
+                    "docId": "",
+                    "docTitle": r["title"][:120],
+                    "docType": "web",
+                    "scope": "web",
+                    "text": r["snippet"],
+                    "score": 0.0,
+                    "url": r["url"],
+                }
+            )
+            domain = urlparse(r["url"]).netloc
+            lines.append(f"[W{idx}] {r['title']}(来源域名:{domain})\n{r['snippet']}")
+        return (
+            "\n\n".join(lines)
+            + "\n\n(引用以上结果时在句末标注 [Wn];不要在回答正文里写任何 URL 或 markdown 链接,来源链接系统会自动展示)"
+        )
 
     @function_tool
     def remember(ctx: RunContextWrapper[AgentDeps], content: str, scope: str) -> str:
