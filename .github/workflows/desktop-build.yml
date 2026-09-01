@@ -68,8 +68,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           if [ "${{ matrix.pyarch }}" = "x86" ]; then
-            # win32 无 numpy 2.x 轮子:替换钉版(constraints 无法覆盖 == 钉版)
+            # win32 轮子断供的包统一降级(constraints 无法覆盖 == 钉版):
+            # numpy 2.x / cryptography 43+ 均不再发布 32 位 Windows 轮子
             sed -i 's/^numpy==.*/numpy==1.26.4/' backend/requirements.txt
+            sed -i 's/^cryptography==.*/cryptography==42.0.8/' backend/requirements.txt
             pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
           else
             pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
