@@ -1,13 +1,15 @@
 #!/bin/bash
-# 打包桌面版 .app + DMG,用于分发给其他经纪人。
+# 打包桌面版(macOS: .app+DMG;Linux: 目录包+tar.gz),用于分发给其他经纪人。
 #
 # 用法:
 #   ./desktop/build.sh              # 干净包:不含任何 key,首启生成 .env 模板让使用者填
 #   WITH_ENV=1 ./desktop/build.sh   # 团队内部包:把本机 backend/.env 的千帆/语音 key 打入
 #                                   # (注意:key 在包内可被提取,仅限内部分发)
+#   PY=python3 ./desktop/build.sh   # 指定 Python(默认 backend/.venv/bin/python)
 set -e
 cd "$(dirname "$0")/.."
-PY=backend/.venv/bin/python
+PY="${PY:-backend/.venv/bin/python}"
+OS="$(uname -s)"
 
 echo "==> 构建前端"
 (cd frontend && npm run build)
@@ -18,25 +20,32 @@ if [ "${WITH_ENV:-0}" = "1" ]; then
   grep -E '^(QIANFAN_|BAIDU_SPEECH_)' backend/.env > desktop/bundled.env
 fi
 
-echo "==> pyinstaller 打包"
+echo "==> pyinstaller 打包 ($OS)"
 rm -rf desktop/build desktop/dist
-$PY -m PyInstaller desktop/workbench.spec --noconfirm \
+"$PY" -m PyInstaller desktop/workbench.spec --noconfirm \
   --distpath desktop/dist --workpath desktop/build 2>&1 | tail -4
 rm -f desktop/bundled.env
 
-APP="desktop/dist/经纪人智能体工作台.app"
-[ -d "$APP" ] || { echo "打包失败:未生成 .app"; exit 1; }
+if [ "$OS" = "Darwin" ]; then
+  APP="desktop/dist/经纪人智能体工作台.app"
+  [ -d "$APP" ] || { echo "打包失败:未生成 .app"; exit 1; }
+  echo "==> ad-hoc 签名(免开发者证书;接收方首次需右键-打开)"
+  codesign --force --deep -s - "$APP" 2>/dev/null || true
+  echo "==> 打 DMG"
+  DMG="desktop/dist/经纪人智能体工作台.dmg"
+  rm -f "$DMG"
+  hdiutil create -volname "经纪人智能体工作台" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
+  echo "" && echo "完成:" && du -sh "$APP" "$DMG"
+else
+  DIR="desktop/dist/workbench"
+  [ -d "$DIR" ] || { echo "打包失败:未生成目录包"; exit 1; }
+  ARCH="$(uname -m)"
+  TAR="desktop/dist/workbench-linux-$ARCH.tar.gz"
+  echo "==> 打 tar.gz"
+  tar -C desktop/dist -czf "$TAR" workbench
+  echo "" && echo "完成:" && du -sh "$DIR" "$TAR"
+  echo "(目标机需要 webkit2gtk: sudo apt install gir1.2-webkit2-4.1)"
+fi
 
-echo "==> ad-hoc 签名(免开发者证书;接收方首次需右键-打开)"
-codesign --force --deep -s - "$APP" 2>/dev/null || true
-
-echo "==> 打 DMG"
-DMG="desktop/dist/经纪人智能体工作台.dmg"
-rm -f "$DMG"
-hdiutil create -volname "经纪人智能体工作台" -srcfolder "$APP" -ov -format UDZO "$DMG" >/dev/null
-
-echo ""
-echo "完成:"
-du -sh "$APP" "$DMG"
 echo ""
 echo "分发说明见 desktop/DISTRIBUTE.md"

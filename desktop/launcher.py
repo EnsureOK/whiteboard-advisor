@@ -20,6 +20,12 @@ import urllib.request
 
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 
+# Windows windowed 打包(console=False)下 stdout/stderr 为 None,print 会崩
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 if not IS_FROZEN:
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     BACKEND = os.path.join(ROOT, "backend")

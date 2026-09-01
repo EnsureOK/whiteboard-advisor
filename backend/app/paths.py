@@ -22,7 +22,12 @@ def _default_data_dir() -> str:
         return os.path.join(_BACKEND_ROOT, "data")
     if sys.platform == "darwin":
         return os.path.expanduser("~/Library/Application Support/WorkbenchAdvisor")
-    return os.path.expanduser("~/.workbench-advisor")
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~\\AppData\\Roaming")
+        return os.path.join(base, "WorkbenchAdvisor")
+    # linux/BSD: XDG 数据目录
+    xdg = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(xdg, "workbench-advisor")
 
 
 #: 可写数据根目录(SQLite/上传文件/会话 JSON/配置)

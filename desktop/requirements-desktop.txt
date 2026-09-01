@@ -1,9 +1,18 @@
-# 桌面版(macOS)附加依赖,在 backend/.venv 里安装:
-#   backend/.venv/bin/pip install -r desktop/requirements-desktop.txt
-# 注: pyobjc 12.0 被官方 yank(py3.9 支持声明有误),必须钉 11.1
-pyobjc-core==11.1
-pyobjc-framework-Cocoa==11.1
-pyobjc-framework-WebKit==11.1
-pyobjc-framework-Quartz==11.1
-pyobjc-framework-Security==11.1
+# 桌面版附加依赖(平台条件交给 pip 解析),在后端环境里安装:
+#   python -m pip install -r desktop/requirements-desktop.txt
+#
+# macOS 注: pyobjc 12.0 被官方 yank(py3.9 支持声明有误),钉 11.1
+pyobjc-core==11.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==11.1; sys_platform == "darwin"
+pyobjc-framework-WebKit==11.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==11.1; sys_platform == "darwin"
+pyobjc-framework-Security==11.1; sys_platform == "darwin"
+
+# Linux 注: 需系统库(Ubuntu/Debian):
+#   sudo apt install libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-webkit2-4.1
+PyGObject>=3.42; sys_platform == "linux"
+
+# Windows 注: pywebview 自带条件依赖(WebView2;Win10/11 已内置 Edge WebView2 运行时)
 pywebview==6.2.1
+
+pyinstaller==6.22.2

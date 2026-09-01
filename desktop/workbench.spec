@@ -1,11 +1,13 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""pyinstaller 配置:经纪人智能体工作台 桌面版(.app)。
+"""pyinstaller 配置:经纪人智能体工作台 桌面版。
 
-由 desktop/build.sh 调用;直接运行:
-  cd 项目根 && backend/.venv/bin/pyinstaller desktop/workbench.spec --noconfirm
+跨平台:macOS 产 .app(BUNDLE);Windows/Linux 产 onedir 目录包。
+由 desktop/build.sh(mac/linux) 或 desktop/build.ps1(windows) 调用;直接运行:
+  cd 项目根 && python -m PyInstaller desktop/workbench.spec --noconfirm
 """
 
 import os
+import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(SPECPATH))) if os.path.basename(SPECPATH) else None
 # SPECPATH 是 spec 所在目录(desktop/),项目根是它的上级
@@ -65,17 +67,20 @@ coll = COLLECT(
     name="workbench",
 )
 
-app = BUNDLE(
-    coll,
-    name="经纪人智能体工作台.app",
-    icon=None,
-    bundle_identifier="com.ensureok.workbench",
-    info_plist={
-        "CFBundleName": "经纪人智能体工作台",
-        "CFBundleDisplayName": "经纪人智能体工作台",
-        "CFBundleShortVersionString": "0.1.0",
-        "NSHighResolutionCapable": True,
-        # WKWebView 访问本机后端
-        "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
-    },
-)
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="经纪人智能体工作台.app",
+        icon=None,
+        bundle_identifier="com.ensureok.workbench",
+        info_plist={
+            "CFBundleName": "经纪人智能体工作台",
+            "CFBundleDisplayName": "经纪人智能体工作台",
+            "CFBundleShortVersionString": "0.1.0",
+            "NSHighResolutionCapable": True,
+            # WKWebView 访问本机后端
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+        },
+    )
+# Windows/Linux: COLLECT 目录包即产物(desktop/dist/workbench/),
+# 由构建脚本压缩为 zip/tar.gz 分发

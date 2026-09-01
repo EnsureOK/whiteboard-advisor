@@ -1,0 +1,4 @@
+# 32 位 Windows 专用约束(pip install -c 本文件):
+# numpy 2.x 不再发布 win32 轮子,降到最后一个支持 32 位的稳定版。
+# 我们对 numpy 的使用(float32 向量的 tobytes/frombuffer/点积)在 1.26 完全兼容。
+numpy==1.26.4

@@ -1,0 +1,131 @@
+name: desktop-build
+
+# 桌面版跨平台打包矩阵:
+#   macOS arm64 / macOS intel x64 -> DMG
+#   Windows x64 / Windows x86(32位,best-effort) -> zip
+#   Linux x64 -> tar.gz
+# 手动触发(workflow_dispatch)或打 tag desktop-v* 时出 Release。
+# CI 产出的均为"干净包"(不含任何 key,首启生成 .env 模板)。
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["desktop-v*"]
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-14
+            arch: x64_arm  # setup-python 默认跟随 runner
+            pyarch: arm64
+            experimental: false
+          - name: macos-intel-x64
+            os: macos-13
+            pyarch: x64
+            experimental: false
+          - name: windows-x64
+            os: windows-latest
+            pyarch: x64
+            experimental: false
+          - name: windows-x86
+            os: windows-latest
+            pyarch: x86
+            experimental: true   # 32 位:numpy 降级通道,尽力支持
+          - name: linux-x64
+            os: ubuntu-22.04
+            pyarch: x64
+            experimental: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.pyarch == 'x86' && 'x86' || '' }}
+
+      - name: Linux system deps (GTK/WebKit bindings)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgirepository1.0-dev libcairo2-dev pkg-config gir1.2-webkit2-4.1
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          if [ "${{ matrix.pyarch }}" = "x86" ]; then
+            pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt -c desktop/constraints-win32.txt
+          else
+            pip install -r backend/requirements.txt -r desktop/requirements-desktop.txt
+          fi
+
+      - name: Build frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: PY=python ./desktop/build.sh
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\desktop\build.ps1
+
+      - name: Rename artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd desktop/dist
+          mv "经纪人智能体工作台.dmg" "workbench-${{ matrix.name }}.dmg"
+
+      - name: Rename artifacts (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd desktop/dist
+          mv workbench-linux-*.tar.gz "workbench-${{ matrix.name }}.tar.gz" || true
+
+      - name: Rename artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd desktop/dist
+          Get-ChildItem workbench-windows-*.zip | Rename-Item -NewName "workbench-${{ matrix.name }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workbench-${{ matrix.name }}
+          path: |
+            desktop/dist/workbench-*.dmg
+            desktop/dist/workbench-*.zip
+            desktop/dist/workbench-*.tar.gz
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
