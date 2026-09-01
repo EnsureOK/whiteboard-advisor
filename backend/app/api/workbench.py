@@ -782,19 +782,26 @@ async def revise_task(task_id: str, body: ReviseBody, db: OrmSession = Depends(g
     return store.task_out(task)
 
 
-# 并发执行上限:防千帆限流与本机过载(批量 fan-out 时排队)
-_AUTO_RUN_SEM = asyncio.Semaphore(3)
+# 并发执行上限:防千帆限流与本机过载(批量 fan-out 时排队)。
+# 惰性创建:py3.9 的 Semaphore() 构造需要事件循环,模块 import 时主线程
+# 可能没有(pyinstaller 打包启动路径),必须在 async 上下文内首次创建。
+_auto_run_sem: Optional[asyncio.Semaphore] = None
+
+
+def _get_auto_run_sem() -> asyncio.Semaphore:
+    global _auto_run_sem
+    if _auto_run_sem is None:
+        _auto_run_sem = asyncio.Semaphore(3)
+    return _auto_run_sem
 
 
 async def _auto_run_task(task_id: str) -> None:
     """服务端驱动的任务执行:循环 step 直到完成/等审批/失败。
 
     经纪人离开页面任务照跑;审批确认(confirm 端点)后再次拉起本协程续跑。
-    并发受 _AUTO_RUN_SEM 限制,批量任务自动排队。
+    并发受信号量限制(3),批量任务自动排队。
     """
-    from app.db import SessionLocal
-
-    async with _AUTO_RUN_SEM:
+    async with _get_auto_run_sem():
         await _auto_run_task_inner(task_id)
 
 
