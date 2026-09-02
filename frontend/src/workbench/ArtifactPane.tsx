@@ -159,6 +159,7 @@ function ArtifactView({
           </>
         ) : isDoc ? (
           <div className="wb-doc">
+            {content.compliance && <ComplianceBar compliance={content.compliance} />}
             {(content.sections || []).map((sec: any, i: number) => (
               <section key={i}>
                 <div className="wb-doc-heading">{sec.heading}</div>
@@ -217,6 +218,43 @@ function ArtifactView({
         </button>
       </div>
     </>
+  );
+}
+
+/** 文档工件的自动合规标注条:通过=绿,命中=黄/红可展开明细 */
+function ComplianceBar({ compliance }: { compliance: any }) {
+  const [open, setOpen] = useState(false);
+  const vs = compliance.violations || [];
+  if (vs.length === 0) {
+    return (
+      <div className="wb-compliance ok">
+        <Icon name="shield" size={12} /> 合规检查通过
+        <span className="wb-compliance-meta">对照 {compliance.rulesChecked} 条规则 · 机器初筛,对外前请复核</span>
+      </div>
+    );
+  }
+  return (
+    <div className={"wb-compliance " + (compliance.overallRisk === "高" ? "bad" : "warn")}>
+      <button className="wb-compliance-head" onClick={() => setOpen(!open)}>
+        <Icon name="alert" size={12} />
+        命中 {vs.length} 项合规风险(最高:{compliance.overallRisk})
+        <span className={"wb-client-caret" + (open ? " open" : "")}>
+          <Icon name="chevronRight" size={11} strokeWidth={2.2} />
+        </span>
+      </button>
+      {open && (
+        <div className="wb-compliance-list">
+          {vs.map((v: any, i: number) => (
+            <div key={i} className="wb-compliance-item">
+              <div><b>[{v.riskLevel}]</b> {v.ruleText}</div>
+              {v.hitContent && <div className="wb-compliance-hit">命中:「{v.hitContent}」</div>}
+              {v.suggestion && <div className="wb-compliance-fix">建议:{v.suggestion}</div>}
+            </div>
+          ))}
+          <div className="wb-compliance-meta">机器初筛结果,物料对外使用前须由合规专员复核。</div>
+        </div>
+      )}
+    </div>
   );
 }
 

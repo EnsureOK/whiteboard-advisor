@@ -529,6 +529,28 @@ async def revise_doc(db: OrmSession, client: Client, old_content: dict, instruct
         return None
 
 
+async def annotate_compliance(db: OrmSession, content: dict) -> None:
+    """文档产出后的自动合规标注(pattern 本地扫描,零 LLM 成本),写入 content["compliance"]。"""
+    from app.services import compliance
+
+    text = content.get("summary", "") + "\n" + "\n".join(
+        f"{s.get('heading', '')}\n{s.get('body', '')}" for s in content.get("sections", [])
+    )
+    try:
+        report = await compliance.audit_text(db, text, mode="pattern")
+        content["compliance"] = {
+            "overallRisk": report["overallRisk"],
+            "violations": [
+                {k: v.get(k, "") for k in ("riskKey", "riskLevel", "ruleText", "hitContent", "suggestion")}
+                for v in report["violations"]
+            ],
+            "rulesChecked": report["rulesChecked"],
+            "checkedAt": report["checkedAt"],
+        }
+    except Exception as e:  # noqa: BLE001 标注失败不阻塞文档产出
+        logger.warning("compliance annotate failed: %s", e)
+
+
 async def compose_doc(db: OrmSession, client: Client, kind: str, upstream_notes: str = "") -> tuple[str, str, dict]:
     """产出文档类工件内容: (artifact_type, title, content)。"""
     doc_type, doc_name, _goal = _DOC_SPECS.get(kind, _DOC_SPECS["followup"])
@@ -541,6 +563,7 @@ async def compose_doc(db: OrmSession, client: Client, kind: str, upstream_notes:
         "sections": draft.get("sections", []),
         "generatedAt": utcnow_iso(),
     }
+    await annotate_compliance(db, content)
     return doc_type, f"{client.name}·{doc_name}", content
 
 

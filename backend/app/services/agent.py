@@ -48,6 +48,7 @@ TOOL_LABELS = {
     "create_task_plan": "制定任务计划",
     "web_search": "联网搜索",
     "remember": "记入长期记忆",
+    "compliance_check": "合规审核",
 }
 
 
@@ -172,6 +173,8 @@ def _build_instructions(deps: "AgentDeps") -> str:
         "- 绝不在回答文本中写出工具名、JSON 调用格式或模拟的调用结果;要用工具就直接调用。\n"
         "- 引用知识库检索结果时在句末标注 [n](与检索返回的编号一致)。\n"
         "- 工具没有返回的信息不要编造;查不到就说明查不到。\n"
+        "- 经纪人发来朋友圈文案、宣传话术、营销物料求把关时,调用 compliance_check 审核;"
+        "转述命中项时保留风险等级与改写建议,并附带复核提示。\n"
         "\n## 任务默认走计划模式(plan-first)\n"
         "- 经纪人布置任务时(检视保单、生成方案书、准备面谈、写跟进、出文档、或其他多步骤工作),"
         "必须调用 create_task_plan 产出执行计划,由经纪人确认(可调整)后再执行——不要自己直接完成任务或生成文档。\n"
@@ -315,6 +318,49 @@ def build_agent():
         return "\n".join(lines)
 
     @function_tool
+    async def compliance_check(ctx: RunContextWrapper[AgentDeps], text: str) -> str:
+        """审核展业物料(朋友圈文案/宣传话术/营销材料)的合规性,给出命中风险与改写建议。
+
+        Args:
+            text: 待审核的物料原文,原样传入不要改写。
+        """
+        from app.services import compliance
+
+        deps = ctx.context
+        try:
+            report = await compliance.audit_text(deps.db, text)
+        except Exception as e:  # noqa: BLE001 保证 tool_events 恰好 append 一次(SSE 摘要按位对齐)
+            deps.tool_events.append(
+                {"name": "compliance_check", "label": TOOL_LABELS["compliance_check"], "summary": "审核失败"}
+            )
+            return f"合规审核执行失败: {e}"
+        vs = report["violations"]
+        deps.tool_events.append(
+            {
+                "name": "compliance_check",
+                "label": TOOL_LABELS["compliance_check"],
+                "summary": f"对照 {report['rulesChecked']} 条规则 · "
+                           + (f"命中 {len(vs)} 项 · 最高{report['overallRisk']}风险" if vs else "未见违规"),
+            }
+        )
+        if not vs:
+            return (
+                f"已对照 {report['rulesChecked']} 条规则审核,未发现违规表述。\n"
+                f"注意: {report['disclaimer']}"
+            )
+        lines = [f"命中 {len(vs)} 项风险(整体等级: {report['overallRisk']}):"]
+        for v in vs:
+            lines.append(
+                f"- [{v['riskLevel']}] {v['ruleText'][:60]}\n"
+                f"  命中片段: 「{v['hitContent'][:60]}」\n"
+                f"  改写建议: {v['suggestion'][:100] or '删除该表述'}"
+            )
+        if report["suppressed"]:
+            lines.append(f"(另有 {len(report['suppressed'])} 项同事项低优先级命中已按互斥规则合并)")
+        lines.append(f"注意: {report['disclaimer']}")
+        return "\n".join(lines)
+
+    @function_tool
     async def create_task_plan(ctx: RunContextWrapper[AgentDeps], kind: str, title: str) -> str:
         """为经纪人布置的任务生成执行计划,交由经纪人确认(可调整)后再执行。
 
@@ -439,6 +485,7 @@ def build_agent():
             get_client_profile,
             list_policies,
             calc_coverage_gaps,
+            compliance_check,
             create_task_plan,
             web_search,
             remember,

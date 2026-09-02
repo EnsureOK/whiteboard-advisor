@@ -29,6 +29,7 @@ function refLabel(ref: string): string {
     "task:plan-batch": "批量任务·起草计划",
     "task:revise-plan": "任务·AI 调整计划",
     "artifact:revise": "文档修订",
+    "compliance:audit": "合规审核",
   };
   if (FIXED[ref]) return FIXED[ref];
   if (/^task:[0-9a-f]{8,}$/i.test(ref)) return "任务执行";

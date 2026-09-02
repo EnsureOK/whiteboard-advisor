@@ -1052,6 +1052,7 @@ async def revise_artifact(
         "sections": draft["sections"],
         "generatedAt": task_engine.utcnow_iso(),
     }
+    await task_engine.annotate_compliance(db, new_content)
     new_artifact = task_engine._save_artifact(  # noqa: SLF001 复用版本管理
         db, c, a.task_id, a.type, a.title, new_content
     )
@@ -1073,6 +1074,55 @@ async def list_artifacts(clientId: str, db: OrmSession = Depends(get_db)) -> lis
         if key not in latest:
             latest[key] = a
     return [store.artifact_out(a) for a in latest.values()]
+
+
+# ---------- 合规审核 ----------
+
+class ComplianceAuditBody(BaseModel):
+    text: str
+    tags: Optional[list[str]] = None
+
+
+@router.post("/compliance/audit")
+async def compliance_audit(
+    body: ComplianceAuditBody,
+    db: OrmSession = Depends(get_db),
+    user: Optional[User] = Depends(auth_svc.get_optional_user),
+) -> dict:
+    """独立审核一段展业物料(LLM 批审,无 LLM 降级正则)。"""
+    from app.services import compliance, credits
+
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "待审文本为空")
+    if user and not credits.has_credits(db, user):
+        raise HTTPException(402, "积分不足:请续费套餐或购买积分包")
+    with collect_usage() as sink:
+        report = await compliance.audit_text(db, text, tags=body.tags)
+    _consume_usage(db, user.id if user else None, sum(sink), "compliance:audit")
+    return report
+
+
+@router.get("/compliance/rules")
+async def compliance_rules_list(db: OrmSession = Depends(get_db)) -> list[dict]:
+    from app.services import compliance
+
+    return [compliance.rule_out(r) for r in compliance.search_rules(db)]
+
+
+class ComplianceRulesBody(BaseModel):
+    rules: list[dict]
+    onConflict: str = "skip"
+
+
+@router.post("/compliance/rules")
+async def compliance_rules_add(body: ComplianceRulesBody, db: OrmSession = Depends(get_db)) -> dict:
+    """批量录入规则(risk_key/内容指纹查重,相似度仅告警)。"""
+    from app.services import compliance
+
+    if body.onConflict not in ("skip", "update"):
+        raise HTTPException(400, "onConflict 必须是 skip / update")
+    return compliance.add_rules(db, body.rules, on_conflict=body.onConflict)
 
 
 # ---------- 每日简报 ----------

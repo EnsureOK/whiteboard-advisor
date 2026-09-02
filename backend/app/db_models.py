@@ -433,3 +433,39 @@ class RedeemCode(Base):
     used_by: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     used_at: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
+
+
+class ComplianceRule(Base):
+    """展业合规审核规则(改造自 MIT 套件 insurance-business-operations 的规则库模型)。
+
+    - risk_key = {rule_set_id}:{risk_code},全库 valid 内唯一(机器消解主键)
+    - content_hash = sha256(归一化 rule_text),同一规则集内查重
+    - pattern 为可选高置信正则:无 LLM 时的本地扫描降级路径
+    - 废弃不删除:valid_status=deprecated + superseded_by 保留审计链
+    """
+
+    __tablename__ = "compliance_rules"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    rule_set_id: Mapped[str] = mapped_column(String(40), index=True)
+    rule_set_name: Mapped[str] = mapped_column(String(120), default="")
+    risk_code: Mapped[str] = mapped_column(String(20))
+    risk_key: Mapped[str] = mapped_column(String(64), index=True)
+    rule_text: Mapped[str] = mapped_column(Text)
+    audit_point: Mapped[str] = mapped_column(Text, default="")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    # 可空正则(unicode);命中即违规的高置信表达,供无 LLM 降级扫描
+    pattern: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+    scene_tags_json: Mapped[str] = mapped_column(Text, default="[]")
+    # 高 / 中 / 低
+    risk_level: Mapped[str] = mapped_column(String(4), default="中")
+    suggestion: Mapped[str] = mapped_column(Text, default="")
+    resolution_json: Mapped[str] = mapped_column(Text, default="{}")
+    # valid / deprecated
+    valid_status: Mapped[str] = mapped_column(String(12), default="valid", index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    supersedes: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    superseded_by: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_doc: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso)
+    updated_at: Mapped[str] = mapped_column(String(40), default=utcnow_iso, onupdate=utcnow_iso)
