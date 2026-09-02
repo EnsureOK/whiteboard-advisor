@@ -1009,7 +1009,7 @@ async def export_artifact(artifact_id: str, fmt: str, db: OrmSession = Depends(g
     if not a:
         raise HTTPException(404, "artifact not found")
     if fmt not in office.MEDIA_TYPES:
-        raise HTTPException(400, "fmt 必须是 xlsx / docx / pptx")
+        raise HTTPException(400, "fmt 必须是 xlsx / docx / pptx / html")
     content = json.loads(a.content_json or "{}")
     try:
         data = office.export_artifact(a.type, a.title, content, fmt)
@@ -1074,6 +1074,21 @@ async def list_artifacts(clientId: str, db: OrmSession = Depends(get_db)) -> lis
         if key not in latest:
             latest[key] = a
     return [store.artifact_out(a) for a in latest.values()]
+
+
+# ---------- 保障图表报告(确定性生成,零 LLM) ----------
+
+@router.post("/clients/{client_id}/coverage-report")
+async def create_coverage_report(client_id: str, db: OrmSession = Depends(get_db)) -> dict:
+    c = db.get(Client, kb.check_id(client_id, "client id"))
+    if not c:
+        raise HTTPException(404, "client not found")
+    from app.services import coverage_report
+
+    title, content = coverage_report.build_coverage_report(db, c)
+    a = task_engine._save_artifact(db, c, None, "coverage_report", title, content)  # noqa: SLF001
+    return {"id": a.id, "type": a.type, "title": a.title, "version": a.version,
+            "summary": content["summary"]}
 
 
 # ---------- 合规审核 ----------

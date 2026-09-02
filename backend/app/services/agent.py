@@ -49,6 +49,7 @@ TOOL_LABELS = {
     "web_search": "联网搜索",
     "remember": "记入长期记忆",
     "compliance_check": "合规审核",
+    "generate_coverage_report": "生成保障图表报告",
 }
 
 
@@ -175,6 +176,8 @@ def _build_instructions(deps: "AgentDeps") -> str:
         "- 工具没有返回的信息不要编造;查不到就说明查不到。\n"
         "- 经纪人发来朋友圈文案、宣传话术、营销物料求把关时,调用 compliance_check 审核;"
         "转述命中项时保留风险等级与改写建议,并附带复核提示。\n"
+        "- 经纪人要客户保障的图表/可视化/面谈展示材料时,调用 generate_coverage_report 即时生成"
+        "(它不是多步任务,不要走 create_task_plan)。\n"
         "\n## 任务默认走计划模式(plan-first)\n"
         "- 经纪人布置任务时(检视保单、生成方案书、准备面谈、写跟进、出文档、或其他多步骤工作),"
         "必须调用 create_task_plan 产出执行计划,由经纪人确认(可调整)后再执行——不要自己直接完成任务或生成文档。\n"
@@ -361,6 +364,30 @@ def build_agent():
         return "\n".join(lines)
 
     @function_tool
+    def generate_coverage_report(ctx: RunContextWrapper[AgentDeps]) -> str:
+        """为当前客户生成可视化保障图表报告(保额构成/缺口构成/到期分布),即时出现在右栏工作区。"""
+        from app.services import coverage_report, task_engine
+
+        deps = ctx.context
+        try:
+            title, content = coverage_report.build_coverage_report(deps.db, deps.client)
+            artifact = task_engine._save_artifact(  # noqa: SLF001 复用版本管理
+                deps.db, deps.client, None, "coverage_report", title, content
+            )
+        except Exception as e:  # noqa: BLE001 保证 tool_events 恰好 append 一次
+            deps.tool_events.append(
+                {"name": "generate_coverage_report",
+                 "label": TOOL_LABELS["generate_coverage_report"], "summary": "生成失败"}
+            )
+            return f"报告生成失败: {e}"
+        deps.tool_events.append(
+            {"name": "generate_coverage_report",
+             "label": TOOL_LABELS["generate_coverage_report"],
+             "summary": f"《{title}》v{artifact.version}"}
+        )
+        return f"已生成《{title}》(v{artifact.version}),右栏工作区可查看并导出。{content['summary']}"
+
+    @function_tool
     async def create_task_plan(ctx: RunContextWrapper[AgentDeps], kind: str, title: str) -> str:
         """为经纪人布置的任务生成执行计划,交由经纪人确认(可调整)后再执行。
 
@@ -486,6 +513,7 @@ def build_agent():
             list_policies,
             calc_coverage_gaps,
             compliance_check,
+            generate_coverage_report,
             create_task_plan,
             web_search,
             remember,

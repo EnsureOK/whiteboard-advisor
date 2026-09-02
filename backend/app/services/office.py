@@ -207,12 +207,14 @@ EXPORTS: dict[str, dict[str, str]] = {
     "plan_doc": {"docx": "docx", "pptx": "pptx"},
     "visit_outline": {"docx": "docx", "pptx": "pptx"},
     "followup_msg": {"docx": "docx"},
+    "coverage_report": {"html": "html"},
 }
 
 MEDIA_TYPES = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "html": "text/html; charset=utf-8",
 }
 
 
@@ -221,6 +223,8 @@ def export_artifact(artifact_type: str, title: str, content: dict, fmt: str) -> 
     allowed = EXPORTS.get(artifact_type, {})
     if fmt not in allowed:
         raise ValueError(f"工件类型 {artifact_type} 不支持导出为 {fmt}")
+    if artifact_type == "coverage_report":
+        return (content.get("html") or "").encode("utf-8")  # 报告本体即自包含 HTML
     if artifact_type == "review_matrix":
         return review_matrix_xlsx(title, content)
     if fmt == "docx":

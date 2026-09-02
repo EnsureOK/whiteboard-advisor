@@ -1285,3 +1285,9 @@
 .wb-compliance-hit { color: var(--w-sub); }
 .wb-compliance-fix { color: var(--w-sub); }
 .wb-compliance-meta { font-size: 11px; color: var(--w-faint); }
+
+/* ---------- 保障图表报告(iframe 内嵌自包含 HTML) ---------- */
+.wb-report-frame {
+  width: 100%; border: 1px solid var(--w-line); border-radius: 8px;
+  background: #fff; height: 620px; display: block;
+}

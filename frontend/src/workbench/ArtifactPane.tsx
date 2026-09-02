@@ -20,6 +20,7 @@ const TYPE_ICON: Record<string, IconName> = {
   followup_msg: "pen",
   checklist: "listChecks",
   report: "chart",
+  coverage_report: "chart",
 };
 
 /** 工件类型 -> 可下载的办公文件格式 */
@@ -34,6 +35,7 @@ const TYPE_EXPORTS: Record<string, { fmt: string; label: string }[]> = {
     { fmt: "pptx", label: "PPT" },
   ],
   followup_msg: [{ fmt: "docx", label: "Word" }],
+  coverage_report: [{ fmt: "html", label: "HTML" }],
 };
 
 /** 右栏:工作区(工件列表 + 保单检视矩阵视图 + 导出) */
@@ -87,8 +89,10 @@ function ArtifactView({
   const content = artifact.content || {};
   const isMatrix = content.kind === "review_matrix";
   const isDoc = content.kind === "doc";
+  const isChart = content.kind === "chart_report";
 
   const exportText = useMemo(() => {
+    if (isChart) return `《${artifact.title}》\n${content.summary || ""}`;
     if (isDoc) {
       const lines = [`《${artifact.title}》`, content.summary || ""];
       for (const sec of content.sections || []) {
@@ -109,7 +113,7 @@ function ArtifactView({
       lines.push(`\n附注: ${ex.line} ${ex.productName || ""} 保额 ${(ex.amount / 10000).toFixed(0)} 万`);
     }
     return lines.join("\n");
-  }, [artifact, isMatrix, isDoc]);
+  }, [artifact, isMatrix, isDoc, isChart]);
 
   const exportPdf = () => {
     const win = window.open("", "_blank");
@@ -157,6 +161,21 @@ function ArtifactView({
               </div>
             )}
           </>
+        ) : isChart ? (
+          /* 自包含 HTML 报告:sandbox 禁脚本,同源仅用于 onLoad 量高自适应 */
+          <iframe
+            className="wb-report-frame"
+            title={artifact.title}
+            sandbox="allow-same-origin"
+            srcDoc={content.html || ""}
+            onLoad={(e) => {
+              const el = e.currentTarget;
+              try {
+                const h = el.contentDocument?.body?.scrollHeight || 600;
+                el.style.height = `${Math.min(2200, h + 24)}px`;
+              } catch { /* 量高失败保持默认高度 */ }
+            }}
+          />
         ) : isDoc ? (
           <div className="wb-doc">
             {content.compliance && <ComplianceBar compliance={content.compliance} />}
