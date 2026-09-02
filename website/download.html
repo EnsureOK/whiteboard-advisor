@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>下载 · 经纪人智能体工作台</title>
+<style>
+  :root {
+    --ink: #16181d;
+    --sub: #5c626e;
+    --faint: #9aa0ab;
+    --line: #e6e8ec;
+    --bg: #fafafa;
+    --card: #ffffff;
+    --ok: #1a7f4e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: var(--bg); color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 56px 24px 80px; }
+
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 40px; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--ink);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700;
+  }
+  .brand-name { font-size: 15px; font-weight: 600; letter-spacing: .02em; }
+
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -.01em; margin-bottom: 10px; }
+  .lede { font-size: 15px; color: var(--sub); line-height: 1.7; margin-bottom: 36px; }
+
+  .hero {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 28px; margin-bottom: 14px;
+  }
+  .hero-label { font-size: 12px; color: var(--faint); margin-bottom: 14px; letter-spacing: .04em; }
+  .dl-btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--ink); color: #fff; text-decoration: none;
+    font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 10px;
+    transition: opacity .15s;
+  }
+  .dl-btn:hover { opacity: .82; }
+  .dl-btn svg { flex: none; }
+  .hero-meta { margin-top: 12px; font-size: 12.5px; color: var(--faint); }
+  .hero-meta a { color: var(--sub); }
+
+  .others { margin-top: 26px; border-top: 1px solid var(--line); padding-top: 18px; }
+  .others-title { font-size: 12px; color: var(--faint); margin-bottom: 10px; letter-spacing: .04em; }
+  .other-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 0; font-size: 13.5px; border-bottom: 1px dashed var(--line);
+  }
+  .other-row:last-child { border-bottom: 0; }
+  .other-name { color: var(--ink); }
+  .other-tag { color: var(--faint); font-size: 12px; margin-left: 8px; }
+  .other-row a { color: var(--ink); text-decoration: none; font-weight: 600; font-size: 13px; }
+  .other-row a:hover { text-decoration: underline; }
+
+  .guide {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 24px 28px; margin-bottom: 14px;
+  }
+  .guide h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+  .guide ol { padding-left: 20px; display: grid; gap: 9px; }
+  .guide li { font-size: 13.5px; line-height: 1.65; color: var(--sub); }
+  .guide li strong { color: var(--ink); font-weight: 600; }
+  .guide .tip {
+    margin-top: 14px; padding: 11px 14px; border-radius: 9px;
+    background: #f4f5f7; border: 1px solid var(--line);
+    font-size: 12.5px; color: var(--sub); line-height: 1.6;
+  }
+  .guide[hidden] { display: none; }
+
+  .facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .fact {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .fact b { display: block; font-size: 13px; margin-bottom: 5px; }
+  .fact span { font-size: 12px; color: var(--sub); line-height: 1.55; display: block; }
+  @media (max-width: 620px) { .facts { grid-template-columns: 1fr; } }
+
+  footer { margin-top: 36px; font-size: 12px; color: var(--faint); line-height: 1.8; }
+  footer a { color: var(--sub); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="brand-mark">保</div>
+    <div class="brand-name">经纪人智能体工作台</div>
+  </div>
+
+  <h1>下载桌面版</h1>
+  <p class="lede">
+    AI 帮你做保单检视、缺口测算、方案书与面谈提纲。客户资料存在你自己的电脑里，
+    支持 macOS、Windows 与 Linux。
+  </p>
+
+  <div class="hero">
+    <div class="hero-label" id="heroLabel">为你的设备推荐</div>
+    <a class="dl-btn" id="heroBtn" href="#">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span id="heroText">下载</span>
+    </a>
+    <div class="hero-meta">
+      始终获取最新版本 · 遇到问题看下方安装说明 ·
+      <a href="https://github.com/Gnosil/whiteboard-advisor/releases/latest" target="_blank" rel="noopener">全部版本</a>
+    </div>
+
+    <div class="others">
+      <div class="others-title">全部平台</div>
+      <div class="other-row">
+        <span class="other-name">macOS<span class="other-tag">Apple 芯片 (M 系列) · .dmg</span></span>
+        <a data-asset="workbench-macos-arm64.dmg" href="#">下载</a>
+      </div>
+      <div class="other-row">
+        <span class="other-name">macOS<span class="other-tag">Intel 芯片 · .dmg</span></span>
+        <a data-asset="workbench-macos-intel-x64.dmg" href="#">下载</a>
+      </div>
+      <div class="other-row">
+        <span class="other-name">Windows<span class="other-tag">64 位 (Win10 及以上) · .zip</span></span>
+        <a data-asset="workbench-windows-x64.zip" href="#">下载</a>
+      </div>
+      <div class="other-row">
+        <span class="other-name">Windows<span class="other-tag">32 位 (老设备) · .zip</span></span>
+        <a data-asset="workbench-windows-x86.zip" href="#">下载</a>
+      </div>
+      <div class="other-row">
+        <span class="other-name">Linux<span class="other-tag">x64 · .tar.gz</span></span>
+        <a data-asset="workbench-linux-x64.tar.gz" href="#">下载</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="guide" id="guide-mac">
+    <h2>macOS 安装</h2>
+    <ol>
+      <li>双击下载的 <strong>.dmg</strong>，把「经纪人智能体工作台」<strong>拖进「应用程序」文件夹</strong>。</li>
+      <li>在访达侧栏<strong>弹出（推出）DMG 磁盘</strong>，之后从启动台打开应用。</li>
+      <li>首次打开如提示「无法验证开发者」：<strong>右键应用 → 打开</strong>；若仍被拦，去
+        <strong>系统设置 → 隐私与安全性</strong>，页面底部点「仍要打开」。这只需要做一次。</li>
+    </ol>
+    <div class="tip">不确定自己是什么芯片？点左上角  → 关于本机：「芯片 Apple M…」选 Apple 芯片版，「处理器 Intel…」选 Intel 版。</div>
+  </div>
+
+  <div class="guide" id="guide-win" hidden>
+    <h2>Windows 安装</h2>
+    <ol>
+      <li>右键下载的 <strong>.zip → 全部解压缩</strong>，解压到任意位置（如 D:\工作台）。</li>
+      <li>打开解压后的文件夹，双击 <strong>workbench.exe</strong> 启动。</li>
+      <li>如出现蓝色「Windows 已保护你的电脑」：点 <strong>「更多信息」→「仍要运行」</strong>。这只需要做一次。</li>
+      <li>建议右键 workbench.exe → 发送到桌面快捷方式，方便日常打开。</li>
+    </ol>
+    <div class="tip">2015 年后的电脑一般都是 64 位；32 位包仅给极老设备兜底，功能相同。</div>
+  </div>
+
+  <div class="guide" id="guide-linux" hidden>
+    <h2>Linux 安装</h2>
+    <ol>
+      <li>解压：<span class="mono">tar xzf workbench-linux-x64.tar.gz</span></li>
+      <li>运行：<span class="mono">./workbench</span>（需要 GTK / WebKit2GTK 运行库）</li>
+    </ol>
+  </div>
+
+  <div class="facts">
+    <div class="fact"><b>数据在本地</b><span>客户资料与知识库存储在你自己的电脑，不经过第三方。</span></div>
+    <div class="fact"><b>登录领积分</b><span>手机号登录即赠免费积分，AI 对话与文档生成按量计。</span></div>
+    <div class="fact"><b>持续更新</b><span>下载链接始终指向最新版本，重装即完成升级，数据保留。</span></div>
+  </div>
+
+  <footer>
+    系统要求：macOS 11+ / Windows 10+ / 主流 Linux 发行版 ·
+    安装遇到问题？联系你的服务顾问。
+  </footer>
+</div>
+
+<script>
+(function () {
+  // 下载源:GitHub Release 固定 latest 链接。之后切换 OSS/CDN 只改这一行。
+  var BASE = "https://github.com/Gnosil/whiteboard-advisor/releases/latest/download/";
+
+  document.querySelectorAll("[data-asset]").forEach(function (a) {
+    a.href = BASE + a.getAttribute("data-asset");
+  });
+
+  var ua = navigator.userAgent;
+  var os = /Windows/i.test(ua) ? "win" : /Mac/i.test(ua) ? "mac" : /Linux|X11/i.test(ua) ? "linux" : "win";
+
+  // mac 芯片检测:UA 不区分 arm/intel,用 WebGL renderer 探测 Apple GPU
+  function macArch() {
+    try {
+      var gl = document.createElement("canvas").getContext("webgl");
+      var ext = gl.getExtension("WEBGL_debug_renderer_info");
+      var r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      return /Apple (GPU|M\d)/i.test(r || "") ? "arm64" : "intel-x64";
+    } catch (e) { return "arm64"; } // 现售 Mac 均为 Apple 芯片,默认 arm64
+  }
+
+  var pick = {
+    mac:   { asset: "workbench-macos-" + (os === "mac" ? macArch() : "arm64") + ".dmg",
+             text: null, guide: "guide-mac" },
+    win:   { asset: "workbench-windows-x64.zip", text: "下载 Windows 版 (64 位)", guide: "guide-win" },
+    linux: { asset: "workbench-linux-x64.tar.gz", text: "下载 Linux 版 (x64)", guide: "guide-linux" },
+  }[os];
+
+  if (os === "mac") {
+    pick.text = pick.asset.indexOf("arm64") > -1 ? "下载 macOS 版 (Apple 芯片)" : "下载 macOS 版 (Intel)";
+  }
+
+  document.getElementById("heroBtn").href = BASE + pick.asset;
+  document.getElementById("heroText").textContent = pick.text;
+
+  ["guide-mac", "guide-win", "guide-linux"].forEach(function (id) {
+    document.getElementById(id).hidden = id !== pick.guide;
+  });
+})();
+</script>
+</body>
+</html>
