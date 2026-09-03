@@ -56,6 +56,7 @@ exe = EXE(
     exclude_binaries=True,
     name="workbench",
     console=False,
+    icon=os.path.join(SPECPATH, "icon.ico") if sys.platform == "win32" else None,
     disable_windowed_traceback=False,
     target_arch=None,
 )
@@ -71,7 +72,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name="经纪人智能体工作台.app",
-        icon=None,
+        icon=os.path.join(SPECPATH, "icon.icns"),
         bundle_identifier="com.ensureok.workbench",
         info_plist={
             "CFBundleName": "经纪人智能体工作台",

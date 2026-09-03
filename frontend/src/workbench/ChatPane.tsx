@@ -208,7 +208,7 @@ export default function ChatPane({
           )}
           {messages.length === 0 && !task && (
             <div className="wb-hero">
-              <div className="wb-hero-logo"><Icon name="shield" size={17} strokeWidth={2} /></div>
+              <div className="wb-hero-logo"><img src="./logo.svg" alt="logo" /></div>
               <div className="wb-hero-title">{client.name} 的专属助理</div>
               <div className="wb-hero-sub">
                 直接提问,或选择一个任务;回答会引用知识库与该客户的私有资料。

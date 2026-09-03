@@ -1291,3 +1291,7 @@
   width: 100%; border: 1px solid var(--w-line); border-radius: 8px;
   background: #fff; height: 620px; display: block;
 }
+
+/* logo 图片撑满 rail 徽标位 */
+.wb-rail-logo img { width: 100%; height: 100%; border-radius: 8px; display: block; }
+.wb-hero-logo img { width: 100%; height: 100%; border-radius: 10px; display: block; }

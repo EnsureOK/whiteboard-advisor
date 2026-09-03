@@ -314,7 +314,7 @@ export default function Workbench() {
       {/* 图标栏 */}
       <nav className="wb-rail">
         <div className="wb-rail-logo">
-          <Icon name="shield" size={15} strokeWidth={2} />
+          <img src="./logo.svg" alt="logo" />
         </div>
         <button
           className={"wb-rail-btn" + (view === "home" ? " active" : "")}
