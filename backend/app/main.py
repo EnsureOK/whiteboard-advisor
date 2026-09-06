@@ -39,16 +39,27 @@ async def _start_scheduler() -> None:
 
     from app.services import scheduler
 
-    if scheduler.enabled():
+    if WB_ROLE != "cloud" and scheduler.enabled():  # 云端网关无工作台业务,不跑简报/续期扫描
         asyncio.get_running_loop().create_task(scheduler.scheduler_loop())
 
-app.include_router(session_router)
-app.include_router(broker_router)
-app.include_router(workbench_router)
-app.include_router(kb_router)
-app.include_router(auth_router)
-app.include_router(billing_router)
-app.include_router(wecom_router)
+# 运行角色: local(默认,桌面/开发全功能) | cloud(云端网关:账户+计费+LLM 代理,
+# 客户数据不上云;部署: WB_ROLE=cloud WB_DATA_DIR=/srv/workbench-cloud uvicorn app.main:app)
+WB_ROLE = os.environ.get("WB_ROLE", "local")
+
+if WB_ROLE == "cloud":
+    from app.api.llm_gateway import router as llm_gateway_router
+
+    app.include_router(auth_router)
+    app.include_router(billing_router)
+    app.include_router(llm_gateway_router)
+else:
+    app.include_router(session_router)
+    app.include_router(broker_router)
+    app.include_router(workbench_router)
+    app.include_router(kb_router)
+    app.include_router(auth_router)
+    app.include_router(billing_router)
+    app.include_router(wecom_router)
 
 # 桌面版/生产:前端构建产物挂在 /app(存在才挂,开发模式仍走 Vite 5173)
 from app.paths import IS_FROZEN, resource_path
@@ -62,7 +73,7 @@ _FRONTEND_DIST = (
         "dist",
     )
 )
-if os.path.isdir(_FRONTEND_DIST):
+if WB_ROLE != "cloud" and os.path.isdir(_FRONTEND_DIST):
     app.mount("/app", StaticFiles(directory=_FRONTEND_DIST, html=True), name="frontend")
 
 
