@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # 登录态 JWT 密钥(生产务必在 .env 里设置 JWT_SECRET)
     jwt_secret: str = ""
 
+    # 多租户门禁:true 时工作台/知识库路由强制登录(多人 Web 部署置 true;
+    # 单机演示与桌面版保持 false)
+    auth_required: bool = False
+
     # Stripe(支付宝/微信;沙盒 key 开发,生产换正式 key + Dashboard 开通支付方式)
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""

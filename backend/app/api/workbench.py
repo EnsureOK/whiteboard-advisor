@@ -39,7 +39,8 @@ from app.services.llm import collect_usage
 
 logger = logging.getLogger("whiteboard-advisor.workbench")
 
-router = APIRouter(prefix="/api/workbench")
+# AUTH_REQUIRED=true 时整条路由强制登录(多人 Web 部署);单机演示模式放行
+router = APIRouter(prefix="/api/workbench", dependencies=[Depends(auth_svc.auth_gate)])
 
 from app.paths import data_path
 

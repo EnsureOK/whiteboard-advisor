@@ -143,10 +143,26 @@ cd frontend && npm run dev                   # http://localhost:5173/?view=workb
 git tag v0.x && git push --tags              # GitHub Actions 自动 Release
 ```
 
-## 9. 已知债务 / 下一步建议
+## 9. 安全评估（2026-09-06 深度扫描）与遗留事项
 
-1. **文档滞后**：README 与 PRD 未反映工作台形态（本文档即为补齐的第一步）。
-2. `cloudbase/` 未提交入库；`.mimosa/ .v2c/ .workbuddy/ .zcode/` 等本地工具目录建议加 .gitignore。
-3. `api/workbench.py` 单文件 ~1180 行，建议按域拆分（clients/tasks/artifacts/reports）。
-4. 无 CI 跑 pytest（只有打包 workflow），建议加 lint+test workflow。
-5. 白板 App 与工作台入口分散，长期考虑合并导航或归档白板。
+Mimosa deep 扫描 + pip-audit 完成，分诊结论：
+
+**已修复**
+- 企微回调 XXE（CWE-776，扫描定级 HIGH）→ `_parse_xml()` 守卫：限 1MB、拒绝 DOCTYPE/ENTITY、defusedxml 禁实体扩展；恶意报文有测试覆盖（`tests/test_security_hardening.py`）。
+- `python-multipart` 0.0.12 → 0.0.20（上传通道，py3.9 内上限）。
+
+**已加固开关（P1）**
+- `AUTH_REQUIRED` 环境变量（默认 false）：置 true 时工作台/知识库整条路由强制登录（`services/auth.py::auth_gate`）。多人 Web 部署前置 true；桌面版/单机演示保持 false。
+- 尚未做**资源归属绑定**（clients 表无 owner 字段）：门禁只解决"必须登录"，多租户下还需校验资源归属者，见遗留。
+
+**已评估接受（记录在案）**
+- `desktop/launcher.py` 路径/SSRF 告警：本地壳读写自身数据目录、健康检查本机后端，无可信输入源。
+- 白板 `/api/session/{id}/pdf|share`：capability URL 模型（32 位 hex 不可枚举），share 本为公开只读链接。
+- `wecom_app.py` SHA1 签名：企微 WXBizMsgCrypt 协议规定，不可更换。
+
+**遗留（按优先级）**
+1. **Python 3.9 → 3.10+ 运行时升级**：pip-audit 残留的 multipart/urllib3/requests/starlette 修复版均已放弃 3.9，这是根治路径；升级后把 CI `dependency-audit` 作业改为阻塞。
+2. **多租户资源归属**：clients 等表加 owner 字段 + 端点校验（与 AUTH_REQUIRED 配套）。
+3. `api/workbench.py` 单文件 ~1180 行，建议按域拆分。
+4. 白板 App 与工作台入口分散，长期合并导航或归档。
+5. 文档：本 SPEC 与 README 已对齐现状（2026-09-06），后续大改动同步更新。

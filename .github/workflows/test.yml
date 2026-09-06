@@ -43,3 +43,18 @@ jobs:
       - run: npm ci
       # tsc -b 严格类型检查 + 产物构建
       - run: npm run build
+
+  security:
+    name: dependency-audit
+    runs-on: ubuntu-22.04
+    continue-on-error: true  # Python 3.9 下 multipart/urllib3/starlette 等已到版本上限,升级 3.10+ 后改为阻塞
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: pip install -r requirements.txt pip-audit
+      - run: python -m pip_audit -l

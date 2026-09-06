@@ -13,12 +13,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
 from app.db import get_db
+from app.services import auth as auth_svc
 from app.services import kb
 from app.services import workbench_store as store
 
 logger = logging.getLogger("whiteboard-advisor.kb-api")
 
-router = APIRouter(prefix="/api/kb")
+# AUTH_REQUIRED=true 时整条路由强制登录(多人 Web 部署);单机演示模式放行
+router = APIRouter(prefix="/api/kb", dependencies=[Depends(auth_svc.auth_gate)])
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20MB
 

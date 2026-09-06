@@ -86,3 +86,16 @@ def get_optional_user(
     except jwt.PyJWTError:
         return None
     return db.get(User, str(payload.get("sub") or ""))
+
+
+def auth_gate(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    db: OrmSession = Depends(get_db),
+) -> Optional[User]:
+    """路由级门禁:AUTH_REQUIRED=true 时整条路由强制登录。
+
+    单机演示(auth_required=False)下放行,返回 None。
+    """
+    if not settings.auth_required:
+        return None
+    return get_current_user(credentials=credentials, db=db)
