@@ -312,6 +312,17 @@ def _safe_client_file_path(file_id: str, filename: str) -> str:
     return path
 
 
+def _save_client_file(file_id: str, filename: str, raw: bytes) -> str:
+    """客户文件落盘:路径经 _safe_client_file_path 规范化并二次校验目录包含。"""
+    from pathlib import Path
+
+    path = _safe_client_file_path(file_id, filename)
+    if not os.path.abspath(path).startswith(os.path.abspath(CLIENT_FILE_DIR) + os.sep):
+        raise ValueError("invalid file path")
+    Path(path).write_bytes(raw)
+    return path
+
+
 @router.post("/clients/{client_id}/files")
 async def upload_client_files(
     client_id: str,
@@ -340,9 +351,7 @@ async def upload_client_files(
         db.commit()
         db.refresh(rec)
 
-        path = _safe_client_file_path(rec.id, filename)
-        with open(path, "wb") as fh:
-            fh.write(raw)
+        path = _save_client_file(rec.id, filename, raw)
         rec.path = os.path.relpath(path, CLIENT_FILE_DIR)
 
         # 可解析文档 -> 同步建知识库文档(私有),后台异步解析入库

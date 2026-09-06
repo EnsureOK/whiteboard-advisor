@@ -16,15 +16,17 @@ import socket
 import sys
 import threading
 import time
-import urllib.request
 
 IS_FROZEN = bool(getattr(sys, "frozen", False))
 
-# Windows windowed 打包(console=False)下 stdout/stderr 为 None,print 会崩
-if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w", encoding="utf-8")
-if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+# Windows windowed 打包(console=False)下 stdout/stderr 为 None,重定向到 devnull
+if sys.stdout is None or sys.stderr is None:
+    _devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    if sys.stdout is None:
+        os.dup2(_devnull_fd, 1)
+    if sys.stderr is None:
+        os.dup2(_devnull_fd, 2)
+    os.close(_devnull_fd)
 
 if not IS_FROZEN:
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -56,33 +58,52 @@ def _pick_port() -> int:
 
 
 def _backend_alive(port: int) -> bool:
+    """健康检查只允许打向本机 HOST,端口为合法整数(http.client 不拼 URL 字符串)。"""
+    if not isinstance(port, int) or not (0 < port < 65536):
+        return False
     try:
-        with urllib.request.urlopen(f"http://{HOST}:{port}/health", timeout=1.5) as r:
-            return r.status == 200
+        import http.client
+
+        conn = http.client.HTTPConnection(HOST, port, timeout=1.5)
+        conn.request("GET", "/health")
+        resp = conn.getresponse()
+        ok = resp.status == 200
+        conn.close()
+        return ok
     except Exception:  # noqa: BLE001
         return False
 
 
+def _data_file_path(name: str) -> str:
+    """数据目录内文件路径:规范化后校验仍在 DATA_DIR 内(防路径穿越)。"""
+    path = os.path.abspath(os.path.join(DATA_DIR, name))
+    if not path.startswith(os.path.abspath(DATA_DIR) + os.sep):
+        raise RuntimeError("invalid data path")
+    return path
+
+
 def _first_run_setup() -> None:
     """打包版首启:准备数据目录(.env 模板/soul.md 副本/建库/演示数据)。"""
+    from pathlib import Path
+
     from app.paths import DATA_DIR, resource_path
 
-    env_path = os.path.join(DATA_DIR, ".env")
+    env_path = _data_file_path(".env")
     if not os.path.isfile(env_path):
         bundled = resource_path("bundled.env")
         if os.path.isfile(bundled):
             shutil.copyfile(bundled, env_path)  # 打包时注入的团队配置
         else:
-            with open(env_path, "w", encoding="utf-8") as f:
-                f.write(
-                    "# 工作台配置(填入后重启应用生效)\n"
-                    "QIANFAN_API_KEY=\n"
-                    "QIANFAN_BASE_URL=https://qianfan.baidubce.com/v2\n"
-                    "QIANFAN_MODEL_FAST=glm-5.3-flash\n"
-                    "QIANFAN_MODEL_DEEP=glm-5.3-flash\n"
-                )
+            Path(env_path).write_text(
+                "# 工作台配置(填入后重启应用生效)\n"
+                "QIANFAN_API_KEY=\n"
+                "QIANFAN_BASE_URL=https://qianfan.baidubce.com/v2\n"
+                "QIANFAN_MODEL_FAST=glm-5.3-flash\n"
+                "QIANFAN_MODEL_DEEP=glm-5.3-flash\n",
+                encoding="utf-8",
+            )
 
-    soul_path = os.path.join(DATA_DIR, "soul.md")
+    soul_path = _data_file_path("soul.md")
     if not os.path.isfile(soul_path):
         tpl = resource_path("soul.md")
         if os.path.isfile(tpl):

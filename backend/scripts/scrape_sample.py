@@ -18,15 +18,55 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import re
+import socket
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
 SEED_PATH = Path(__file__).resolve().parents[1] / "app" / "data" / "knowledge_seed.json"
 _SKIP_TAGS = {"script", "style", "head", "nav", "footer"}
+
+
+def _assert_public_http_url(url: str) -> None:
+    """SSRF 防护:仅允许 http(s) 公网地址,拒绝内网/回环/链路本地/保留网段。"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise SystemExit("仅允许 http(s) URL")
+    host = parsed.hostname or ""
+    if not host:
+        raise SystemExit("URL 缺少主机名")
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError as e:
+        raise SystemExit(f"域名解析失败: {e}")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+        ):
+            raise SystemExit(f"拒绝访问非公网地址(SSRF 防护): {ip}")
+
+
+def _fetch_public_text(url: str) -> str:
+    """抓取公网页面正文:协议/目标 IP 校验 + 禁止重定向(防 DNS rebinding 绕过)。"""
+    _assert_public_http_url(url)
+    resp = httpx.get(
+        url,
+        timeout=20,
+        headers={"User-Agent": "WhiteboardAdvisor-sample/0.1"},
+        follow_redirects=False,
+    )
+    resp.raise_for_status()
+    return resp.text
 
 
 class _TextExtractor(HTMLParser):
@@ -65,14 +105,12 @@ def main() -> None:
     ap.add_argument("--keywords", default="", help="逗号分隔")
     args = ap.parse_args()
 
-    resp = httpx.get(args.url, timeout=20, headers={"User-Agent": "WhiteboardAdvisor-sample/0.1"})
-    resp.raise_for_status()
-    text = extract_text(resp.text)
+    text = extract_text(_fetch_public_text(args.url))
     if not text:
         raise SystemExit("未能抽取到正文文本")
 
     chunk = {
-        "id": "scraped-" + hashlib.sha1(args.url.encode()).hexdigest()[:10],
+        "id": "scraped-" + hashlib.sha256(args.url.encode()).hexdigest()[:10],
         "jurisdiction": args.jurisdiction,
         "category": args.category,
         "text": text,
