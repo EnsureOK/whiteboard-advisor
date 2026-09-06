@@ -1,5 +1,7 @@
 # Project: WhiteboardAdvisor (代号待定)
 
+> ⚠️ **历史文档（2026-05-22）**：本 PRD 只覆盖"AI 白板演示"阶段的产品，白板现已演化为经纪人工作台中的一个视图。当前产品形态（工作台/任务 DAG/知识库/计费/桌面打包）的工程规格见 [docs/SPEC.md](./docs/SPEC.md)。
+
 **版本**: v0.1 (Initial Draft)
 **日期**: 2026-05-22
 **作者**: Dan & Claude (协作产出)
