@@ -43,3 +43,29 @@ QIANFAN_API_KEY=<用户登录后获得的 JWT>
 ```
 
 本地 llm.py / agents SDK / embedding 的调用协议与千帆一致,直接生效。
+
+## 支付宝当面付(国内扫码)
+
+沙箱联调(现在就能做):
+1. https://open.alipay.com -> 控制台 -> 沙箱环境,拿沙箱 APPID
+2. 用「密钥工具」生成 RSA2 应用密钥对,上传应用公钥,得到「支付宝公钥」
+3. 云端 .env 追加(网关默认已指沙箱):
+
+```
+ALIPAY_APPID=<沙箱 APPID>
+ALIPAY_APP_PRIVATE_KEY=<应用私钥,纯 base64 体即可>
+ALIPAY_PUBLIC_KEY=<支付宝公钥>
+ALIPAY_NOTIFY_URL=https://<域名>/api/billing/alipay/notify   # 本地联调可不配,轮询兜底
+```
+
+4. 手机装「沙箱版支付宝」App(开放平台下载),用沙箱买家账号扫码付
+5. 生产切换:正式 APPID/密钥 + ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do
+   (需企业支付宝完成「当面付」产品签约,费率 0.38%)
+
+前端行为:配置了支付宝后,计费面板「开通/购买」自动弹二维码 + 3s 轮询到账;
+未配置则回落 Stripe(海外)或演示通道。
+
+## 微信支付 Native(骨架)
+
+config 已留 WXPAY_* 字段;待商户号(pay.weixin.qq.com,需营业执照)下来后
+补 transactions/native 下单与回调验签,结构与支付宝对称。

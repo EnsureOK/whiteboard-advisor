@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as OrmSession
 
@@ -348,3 +348,77 @@ def grant_signup_bonus(db: OrmSession, user: User) -> None:
     if existing:
         return
     credits.grant(db, user, SIGNUP_GRANT_CREDITS * CREDIT, source="signup_grant", ref="welcome")
+
+
+# ---------- 支付宝当面付(国内扫码;沙箱与生产同一套代码) ----------
+
+@router.get("/channels")
+async def payment_channels() -> dict:
+    """前端据此决定展示哪些支付通道。"""
+    return {
+        "alipay": settings.has_alipay if hasattr(settings, "has_alipay") else bool(settings.alipay_appid and settings.alipay_app_private_key),
+        "stripe": bool(settings.stripe_api_key),
+        "wxpay": bool(settings.wxpay_mchid),
+    }
+
+
+@router.post("/alipay/precreate")
+async def alipay_precreate(
+    body: CheckoutBody,
+    user: User = Depends(auth_svc.get_current_user),
+    db: OrmSession = Depends(get_db),
+) -> dict:
+    if not (settings.alipay_appid and settings.alipay_app_private_key):
+        raise HTTPException(503, "支付宝支付未配置")
+    from app.services import alipay_pay
+
+    kind, item = _item_def(body.item)
+    order = Order(user_id=user.id, plan=body.item, amount_cents=item["priceCents"],
+                  channel="alipay", status="created")
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    try:
+        qr = await alipay_pay.precreate(order.id, item["priceCents"], f"工作台·{item['name']}")
+    except ValueError as e:
+        order.status = "failed"
+        db.commit()
+        raise HTTPException(502, str(e))
+    return {"orderId": order.id, **qr}
+
+
+@router.get("/alipay/orders/{order_id}")
+async def alipay_order_status(
+    order_id: str,
+    user: User = Depends(auth_svc.get_current_user),
+    db: OrmSession = Depends(get_db),
+) -> dict:
+    """前端轮询:主动查单,支付成功即履约(与异步通知互为冗余,幂等)。"""
+    from app.services import alipay_pay
+
+    order = db.get(Order, order_id)
+    if not order or order.user_id != user.id:
+        raise HTTPException(404, "order not found")
+    if order.status == "paid":
+        return {"status": "paid", "billing": billing_status(db, user)}
+    r = await alipay_pay.query(order.id)
+    if r["status"] == "paid":
+        _fulfill_order(db, order)
+        return {"status": "paid", "billing": billing_status(db, user)}
+    return {"status": r["status"]}
+
+
+@router.post("/alipay/notify")
+async def alipay_notify(request: Request, db: OrmSession = Depends(get_db)) -> Response:
+    """异步通知(生产入账主路径):验签通过且 TRADE_SUCCESS 才履约;应答 success。"""
+    from app.services import alipay_pay
+
+    form = dict((await request.form()).items())
+    if not alipay_pay.verify_notify(form):
+        logger.warning("alipay notify 验签失败: %s", form.get("out_trade_no"))
+        return Response(content="failure", media_type="text/plain")
+    if form.get("trade_status") in ("TRADE_SUCCESS", "TRADE_FINISHED"):
+        order = db.get(Order, form.get("out_trade_no", ""))
+        if order and order.status != "paid":
+            _fulfill_order(db, order)
+    return Response(content="success", media_type="text/plain")

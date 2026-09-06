@@ -45,6 +45,10 @@ export default function BillingView({ onToast, onAuthChange }: Props) {
   const [stripeOn, setStripeOn] = useState(false);
   const [ledger, setLedger] = useState<Awaited<ReturnType<typeof api.billingLedger>>>([]);
   const [buying, setBuying] = useState<string | null>(null);
+  const [channels, setChannels] = useState<{ alipay: boolean; stripe: boolean; wxpay: boolean }>({
+    alipay: false, stripe: false, wxpay: false,
+  });
+  const [payQr, setPayQr] = useState<{ orderId: string; qrImage: string } | null>(null);
   const [code, setCode] = useState("");
 
   const refresh = useCallback(async () => {
@@ -75,18 +79,45 @@ export default function BillingView({ onToast, onAuthChange }: Props) {
 
   useEffect(() => {
     refresh().catch((e) => onToast(`加载计费信息失败: ${e.message}`));
+    api.billingChannels().then(setChannels).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 支付宝扫码弹层期间:3s 轮询订单,到账即关闭并刷新
+  useEffect(() => {
+    if (!payQr) return;
+    const t = setInterval(async () => {
+      try {
+        const r = await api.alipayOrderStatus(payQr.orderId);
+        if (r.status === "paid") {
+          setPayQr(null);
+          onToast("支付成功,积分已到账");
+          await refresh();
+        } else if (r.status === "closed") {
+          setPayQr(null);
+          onToast("订单已关闭,未完成支付");
+        }
+      } catch { /* 轮询失败下一轮重试 */ }
+    }, 3000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [payQr]);
 
   const buy = async (item: string) => {
     setBuying(item);
     try {
+      if (channels.alipay) {
+        // 国内主通道:当面付扫码,弹二维码 + 轮询到账
+        const r = await api.alipayPrecreate(item);
+        setPayQr({ orderId: r.orderId, qrImage: r.qrImage });
+        return;
+      }
       const r = await api.billingCheckout(item);
       if (r.demo) {
-        onToast("演示通道:已直接开通(配置 Stripe 后为真实支付)");
+        onToast("演示通道:已直接开通(配置支付后为真实收款)");
         await refresh();
       } else if (r.checkoutUrl) {
-        window.location.href = r.checkoutUrl; // 跳 Stripe Checkout(支付宝/微信)
+        window.location.href = r.checkoutUrl; // 跳 Stripe Checkout(海外通道)
       }
     } catch (e: any) {
       onToast(`下单失败: ${e.message}`);
@@ -109,6 +140,16 @@ export default function BillingView({ onToast, onAuthChange }: Props) {
 
   return (
     <div className="wb-billing">
+      {payQr && (
+        <div className="wb-payqr-mask" onClick={() => setPayQr(null)}>
+          <div className="wb-payqr-card" onClick={(e) => e.stopPropagation()}>
+            <div className="wb-payqr-title">支付宝扫码支付</div>
+            <img src={`data:image/png;base64,${payQr.qrImage}`} alt="支付宝二维码" />
+            <div className="wb-payqr-hint">打开手机支付宝「扫一扫」完成支付<br />支付成功后自动到账</div>
+            <button className="wb-btn ghost" onClick={() => setPayQr(null)}>取消</button>
+          </div>
+        </div>
+      )}
       <div className="wb-billing-inner">
         {!me ? (
           <LoginCard

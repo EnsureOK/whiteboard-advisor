@@ -1295,3 +1295,18 @@
 /* logo 图片撑满 rail 徽标位 */
 .wb-rail-logo img { width: 100%; height: 100%; border-radius: 8px; display: block; }
 .wb-hero-logo img { width: 100%; height: 100%; border-radius: 10px; display: block; }
+
+/* ---------- 支付宝扫码弹层 ---------- */
+.wb-payqr-mask {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(20, 20, 19, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.wb-payqr-card {
+  background: #fff; border-radius: 14px; padding: 26px 30px;
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .18);
+}
+.wb-payqr-title { font-size: 15px; font-weight: 700; color: var(--w-ink); }
+.wb-payqr-card img { width: 220px; height: 220px; border: 1px solid var(--w-line); border-radius: 10px; }
+.wb-payqr-hint { font-size: 12px; color: var(--w-sub); text-align: center; line-height: 1.6; }

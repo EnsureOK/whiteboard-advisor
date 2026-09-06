@@ -444,6 +444,18 @@ export const api = {
       { method: "POST", body: JSON.stringify({ item }) }
     ),
 
+  billingChannels: () =>
+    req<{ alipay: boolean; stripe: boolean; wxpay: boolean }>("/api/billing/channels"),
+
+  alipayPrecreate: (item: string) =>
+    req<{ orderId: string; qrCode: string; qrImage: string }>("/api/billing/alipay/precreate", {
+      method: "POST",
+      body: JSON.stringify({ item }),
+    }),
+
+  alipayOrderStatus: (orderId: string) =>
+    req<{ status: string; billing?: BillingStatus }>(`/api/billing/alipay/orders/${orderId}`),
+
   billingRedeem: (code: string) =>
     req<{ ok: boolean; status: BillingStatus }>("/api/billing/redeem", {
       method: "POST",

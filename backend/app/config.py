@@ -38,9 +38,25 @@ class Settings(BaseSettings):
     # 单机演示与桌面版保持 false)
     auth_required: bool = False
 
-    # Stripe(支付宝/微信;沙盒 key 开发,生产换正式 key + Dashboard 开通支付方式)
+    # Stripe(海外通道;沙盒 key 开发,生产换正式 key + Dashboard 开通支付方式)
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""
+
+    # 支付宝当面付(国内扫码收款):开放平台应用凭证。默认沙箱网关,生产换
+    # https://openapi.alipay.com/gateway.do
+    alipay_appid: str = ""
+    alipay_app_private_key: str = ""  # 应用私钥(RSA2),PEM 或纯 base64 体
+    alipay_public_key: str = ""       # 支付宝公钥(验异步通知签名)
+    alipay_gateway: str = "https://openapi-sandbox.dl.alipaydev.com/gateway.do"
+    alipay_notify_url: str = ""       # 公网回调,如 https://<域名>/api/billing/alipay/notify
+
+    # 微信支付 Native(国内扫码):商户号 API v3(骨架,待商户资质)
+    wxpay_mchid: str = ""
+    wxpay_appid: str = ""
+    wxpay_api_v3_key: str = ""
+    wxpay_serial_no: str = ""
+    wxpay_private_key: str = ""
+    wxpay_notify_url: str = ""
 
     # 联网搜索(agent 工具):配博查 key 生产可用;未配置走 DuckDuckGo 兜底
     bocha_api_key: str = ""
