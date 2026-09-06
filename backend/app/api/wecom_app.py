@@ -27,8 +27,9 @@ import logging
 import socket
 import struct
 import time
-import xml.etree.ElementTree as ET
 from typing import Optional
+
+from defusedxml import ElementTree as ET  # 禁 DTD 实体,防 XXE/实体扩展攻击(企微回调是不可信 XML)
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -58,6 +59,19 @@ def _aes_key() -> bytes:
 def _sign(token: str, timestamp: str, nonce: str, encrypt: str) -> str:
     raw = "".join(sorted([token, timestamp, nonce, encrypt]))
     return hashlib.sha1(raw.encode()).hexdigest()
+
+
+_MAX_XML_BYTES = 1024 * 1024  # 企微文本消息远小于此;防御异常/恶意超大报文
+
+
+def _parse_xml(data: bytes):
+    """解析不可信 XML 的唯一入口:限大小、拒绝 DTD/实体,再交 defusedxml(禁实体扩展)。"""
+    if len(data) > _MAX_XML_BYTES:
+        raise HTTPException(413, "payload too large")
+    lowered = data[:2048].lower()
+    if b"<!doctype" in lowered or b"<!entity" in lowered:
+        raise HTTPException(400, "reject doctype/entity")
+    return ET.fromstring(data)
 
 
 def decrypt_msg(encrypt_b64: str) -> str:
@@ -232,11 +246,11 @@ async def receive_message(request: Request, msg_signature: str, timestamp: str, 
     if not _enabled():
         raise HTTPException(404, "wecom app not configured")
     body = await request.body()
-    root = ET.fromstring(body)
+    root = _parse_xml(body)
     encrypt = root.findtext("Encrypt") or ""
     if _sign(settings.wecom_app_token, timestamp, nonce, encrypt) != msg_signature:
         raise HTTPException(403, "bad signature")
-    plain = ET.fromstring(decrypt_msg(encrypt))
+    plain = _parse_xml(decrypt_msg(encrypt).encode("utf-8"))
     msg_type = plain.findtext("MsgType") or ""
     from_user = plain.findtext("FromUserName") or ""
     if msg_type == "text":
